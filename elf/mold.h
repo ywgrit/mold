@@ -238,7 +238,7 @@ public:
   i64 get_priority() const;
   u64 get_addr() const;
   const ElfShdr<E> &shdr() const;
-  std::span<ElfRel<E>> get_rels(Context<E> &ctx) const;
+  std::span<ElfRel<E>> get_rels(Context<E> &ctx) const; // ElfRel is relocation entry, i.e Elf{32|64}_Rel[a]
   std::span<FdeRecord<E>> get_fdes() const;
   std::string_view get_func_name(Context<E> &ctx, i64 offset) const;
   bool is_relr_reloc(Context<E> &ctx, const ElfRel<E> &rel) const;
@@ -1061,7 +1061,7 @@ struct ComdatGroupRef {
   u32 sect_idx;
   std::span<U32<E>> members;
 };
-
+// There are multiple pieces(fragments) in one MergeableSection
 template <typename E>
 struct MergeableSection {
   std::pair<SectionFragment<E> *, i64> get_fragment(i64 offset);
@@ -1109,16 +1109,16 @@ public:
 
   MappedFile<Context<E>> *mf = nullptr;
   std::span<ElfShdr<E>> elf_sections;
-  std::span<ElfSym<E>> elf_syms;
-  std::vector<Symbol<E> *> symbols;
-  i64 first_global = 0;
+  std::span<ElfSym<E>> elf_syms; // All elf_syms in symtab of this inputfile
+  std::vector<Symbol<E> *> symbols; // Each elf_sym is corresponding to one symbol, the first part of symbols is consist of local_ symbols, the second part is consist of global or weak symbols.
+  i64 first_global = 0; // firstGlobal == sh_info of SHT_SYMTAB, the number of local symbols.
 
   std::string filename;
   bool is_dso = false;
   u32 priority;
   Atomic<bool> is_alive = false;
-  std::string_view shstrtab;
-  std::string_view symbol_strtab;
+  std::string_view shstrtab; // section header string table which holds all section's name
+  std::string_view symbol_strtab; // hold all string literals
 
   // To create an output .symtab
   u64 local_symtab_idx = 0;
@@ -1746,7 +1746,7 @@ struct Context {
   bool is_static;
   bool in_lib = false;
   i64 file_priority = 10000;
-  std::unordered_set<std::string_view> visited;
+  std::unordered_set<std::string_view> visited; // name of visited files
   tbb::task_group tg;
 
   bool has_error = false;
@@ -2010,7 +2010,7 @@ public:
   // A symbol usually belongs to an input section, but it can belong
   // to a section fragment, an output section or nothing
   // (i.e. absolute symbol). `origin` holds one of them. We use the
-  // least significant two bits to distinguish type.
+  // least significant two bits to distinguish type. origin is the address of own section
   enum : uintptr_t {
     TAG_ABS  = 0b00,
     TAG_ISEC = 0b01,
@@ -2361,6 +2361,7 @@ inline bool InputSection<E>::is_killed_by_icf() const {
   return this->leader && this->leader != this;
 }
 
+// return {the target fragment, the relative offset in target fragment}, the target fragment is exactly larger than(or equal to) offset.
 template <typename E>
 std::pair<SectionFragment<E> *, i64>
 MergeableSection<E>::get_fragment(i64 offset) {

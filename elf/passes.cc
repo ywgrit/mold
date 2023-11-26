@@ -280,7 +280,7 @@ void do_resolve_symbols(Context<E> &ctx) {
 
     tbb::parallel_for_each(ctx.objs, [](ObjectFile<E> *file) {
       for (ComdatGroupRef<E> &ref : file->comdat_groups)
-        if (ref.group->owner != file->priority)
+        if (ref.group->owner != file->priority) // kill groups not belong to this file
           for (u32 i : ref.members)
             if (file->sections[i])
               file->sections[i]->kill();
@@ -367,7 +367,7 @@ void resolve_section_pieces(Context<E> &ctx) {
   Timer t(ctx, "resolve_section_pieces");
 
   tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
-    file->initialize_mergeable_sections(ctx);
+    file->initialize_mergeable_sections(ctx); // Split section to section pieces(fragments)
   });
 
   tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {

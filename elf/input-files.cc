@@ -526,7 +526,7 @@ void ObjectFile<E>::initialize_symbols(Context<E> &ctx) {
   static Counter counter("all_syms");
   counter += this->elf_syms.size();
 
-  // Initialize local symbols
+  // Initialize local symbols, TODO(wx): why not handle this in loop with 1 <= id < first_global?
   this->local_syms.resize(this->first_global);
   this->local_syms[0].file = this;
   this->local_syms[0].sym_idx = 0;
@@ -806,16 +806,16 @@ void ObjectFile<E>::resolve_section_pieces(Context<E> &ctx) {
     sym.value = frag_offset;
   }
 
-  // Compute the size of frag_syms.
+  // Compute the size of frag_syms. 1, The number of symbols which are present in mergeable_sections. 2, put all dummy_symbols of these symbols into frag_syms.
   i64 nfrag_syms = 0;
   for (std::unique_ptr<InputSection<E>> &isec : sections)
     if (isec && isec->is_alive && (isec->shdr().sh_flags & SHF_ALLOC))
       for (ElfRel<E> &r : isec->get_rels(ctx))
         if (const ElfSym<E> &esym = this->elf_syms[r.r_sym];
-            esym.st_type == STT_SECTION && mergeable_sections[get_shndx(esym)])
+            esym.st_type == STT_SECTION/* Note this */ && mergeable_sections[get_shndx(esym)])
           nfrag_syms++;
 
-  this->frag_syms.resize(nfrag_syms);
+  this->frag_syms.resize(nfrag_syms); // Make nfrag_syms symbols.
 
   // For each relocation referring a mergeable section symbol, we create
   // a new dummy non-section symbol and redirect the relocation to the
@@ -843,6 +843,7 @@ void ObjectFile<E>::resolve_section_pieces(Context<E> &ctx) {
       if (!frag)
         Fatal(ctx) << *this << ": bad relocation at " << r.r_sym;
 
+      // Instantiate fragment symbols
       Symbol<E> &sym = this->frag_syms[idx];
       sym.file = this;
       sym.set_name("<fragment>");
@@ -858,7 +859,7 @@ void ObjectFile<E>::resolve_section_pieces(Context<E> &ctx) {
   assert(idx == this->frag_syms.size());
 
   for (Symbol<E> &sym : this->frag_syms)
-    this->symbols.push_back(&sym);
+    this->symbols.push_back(&sym); // put frag_syms back to symbols
 }
 
 template <typename E>

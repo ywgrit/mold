@@ -1530,7 +1530,7 @@ struct ElfSym<E> {
 
 template <typename E>
 struct ElfShdr {
-  U32<E> sh_name;
+  U32<E> sh_name; // this member specifies the name of the section, its value is an index into the section header string table section
   U32<E> sh_type;
   Word<E> sh_flags;
   Word<E> sh_addr;
