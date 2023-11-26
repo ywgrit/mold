@@ -1536,7 +1536,7 @@ struct ElfShdr {
   Word<E> sh_addr;
   Word<E> sh_offset;
   Word<E> sh_size;
-  U32<E> sh_link;
+  U32<E> sh_link; // This member holds a section header table index link(Link to another section), whose interpretation depends on the section type. For sht_symtab, it is section header index of string table section
   U32<E> sh_info;
   Word<E> sh_addralign;
   Word<E> sh_entsize;
