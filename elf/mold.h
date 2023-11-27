@@ -163,14 +163,14 @@ struct CieRecord {
       rel_idx(rel_idx), rels(rels), contents(file.get_string(ctx, isec.shdr())) {}
 
   i64 size() const {
-    return *(U32<E> *)(contents.data() + input_offset) + 4;
+    return *(U32<E> *)(contents.data() + input_offset) + 4; // size of this CIE
   }
 
   std::string_view get_contents() const {
     return contents.substr(input_offset, size());
   }
 
-  std::span<ElfRel<E>> get_rels() const {
+  std::span<ElfRel<E>> get_rels() const { // get all elf_rels in this CIE
     i64 end = rel_idx;
     while (end < rels.size() && rels[end].r_offset < input_offset + size())
       end++;
@@ -179,15 +179,15 @@ struct CieRecord {
 
   bool equals(const CieRecord &other) const;
 
-  ObjectFile<E> &file;
-  InputSection<E> &input_section;
-  u32 input_offset = -1;
+  ObjectFile<E> &file; // object file this CIE belongs to
+  InputSection<E> &input_section; // the .eh_frame section of object file
+  u32 input_offset = -1; // the begin offset of this CIE
   u32 output_offset = -1;
-  u32 rel_idx = -1;
+  u32 rel_idx = -1; // the first elf_rel in rels which r_offset is bigger than input_offset
   u32 icf_idx = -1;
   bool is_leader = false;
-  std::span<ElfRel<E>> rels;
-  std::string_view contents;
+  std::span<ElfRel<E>> rels; // all ElfRels of .eh_frame section
+  std::string_view contents; // the content of the .eh_frame section
 };
 
 template <typename E>
@@ -202,7 +202,7 @@ struct FdeRecord {
   u32 input_offset = -1;
   u32 output_offset = -1;
   u32 rel_idx = -1;
-  u16 cie_idx = -1;
+  u16 cie_idx = -1; // each cie is followed multiple fdes, cie_idx is the idx of cie in .eh_frame section
   Atomic<bool> is_alive = true;
 };
 
@@ -254,12 +254,12 @@ public:
 
   [[no_unique_address]] InputSectionExtras<E> extra;
 
-  i32 fde_begin = -1;
-  i32 fde_end = -1;
+  i32 fde_begin = -1; // the idx of begin fde in fdes of .eh_frame section
+  i32 fde_end = -1; // the idx of end fde in fdes of .eh_frame section
 
   u64 offset = -1;
   u32 shndx = -1;
-  u32 relsec_idx = -1;
+  u32 relsec_idx = -1; // For section which needs to be relocated, there is corresponding section which contains all relocatable entry, ie, relocatable section, this member is the idx of the corresponding relocatable section
   u32 reldyn_offset = 0;
 
   bool uncompressed = false;
@@ -1226,7 +1226,7 @@ private:
 
   bool has_common_symbol = false;
 
-  const ElfShdr<E> *symtab_sec;
+  const ElfShdr<E> *symtab_sec; // sections of this type contain extended section indexes, each entry is associated with an symbol of symbol table which sh_shndx is SHN_XINDEX. The value of each entry represents the header index of section which the associated symbol is defined.
   std::span<U32<E>> symtab_shndx_sec;
 };
 

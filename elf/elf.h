@@ -79,7 +79,7 @@ enum : u32 {
   SHT_FINI_ARRAY = 15,
   SHT_PREINIT_ARRAY = 16,
   SHT_GROUP = 17,
-  SHT_SYMTAB_SHNDX = 18,
+  SHT_SYMTAB_SHNDX = 18, // sections of this type contain extended section indexes, each entry is associated with an symbol of symbol table which sh_shndx is SHN_XINDEX. The value of each entry represents the header index of section which the associated symbol is defined.
   SHT_RELR = 19,
   SHT_LLVM_ADDRSIG = 0x6fff4c03,
   SHT_GNU_HASH = 0x6ffffff6,
@@ -1509,7 +1509,7 @@ struct ElfSym<E> {
   bool is_weak() const { return st_bind == STB_WEAK; }
   bool is_undef_weak() const { return is_undef() && is_weak(); }
 
-  U32<E> st_name;
+  U32<E> st_name; // index of symbol string table entry which hold string name of this symbol
   U32<E> st_value;
   U32<E> st_size;
 
@@ -1530,7 +1530,7 @@ struct ElfSym<E> {
 
 template <typename E>
 struct ElfShdr {
-  U32<E> sh_name; // this member specifies the name of the section, its value is an index into the section header string table section
+  U32<E> sh_name; // This member specifies the name of the section, its value is an index into the section header string table section
   U32<E> sh_type;
   Word<E> sh_flags;
   Word<E> sh_addr;

@@ -213,13 +213,13 @@ void ObjectFile<E>::initialize_sections(Context<E> &ctx) {
     }
 
     switch (shdr.sh_type) {
-    case SHT_GROUP: {
+        case SHT_GROUP: { // reference: https://docs.oracle.com/cd/E19683-01/816-1386/chapter7-26/index.html
       // Get the signature of this section group.
       if (shdr.sh_info >= this->elf_syms.size())
         Fatal(ctx) << *this << ": invalid symbol index";
-      const ElfSym<E> &esym = this->elf_syms[shdr.sh_info];
+      const ElfSym<E> &esym = this->elf_syms[shdr.sh_info]; // For section with type of SHT_GROUP, sh_info is the index of symbol table entry which identifies this section
 
-      std::string_view signature;
+      std::string_view signature; // signature of grouping section, ie, symbol name, it is an entry of shstrtab or symbol_strtab
       if (esym.st_type == STT_SECTION) {
         signature = this->shstrtab.data() +
                     this->elf_sections[get_shndx(esym)].sh_name;
@@ -233,7 +233,7 @@ void ObjectFile<E>::initialize_sections(Context<E> &ctx) {
         continue;
 
       // Get comdat group members.
-      std::span<U32<E>> entries = this->template get_data<U32<E>>(ctx, shdr);
+      std::span<U32<E>> entries = this->template get_data<U32<E>>(ctx, shdr); // The section data of a SHT_GROUP section is an array of Elf32_Word entries. The first entry is a flag word. The remaining entries are a sequence of section header indices. flag represents the type(eg, GRP_COMDAT) of this grouping section.
 
       if (entries.empty())
         Fatal(ctx) << *this << ": empty SHT_GROUP";
@@ -303,7 +303,7 @@ void ObjectFile<E>::initialize_sections(Context<E> &ctx) {
       // --oformat=binary is given), we discard all non-memory-allocated
       // sections. This is because without a section header, we can't find
       // their places in an output file in the first place.
-      if (ctx.arg.oformat_binary && !(shdr.sh_flags & SHF_ALLOC))
+      if (ctx.arg.oformat_binary /* output raw binary instead of elf */ && !(shdr.sh_flags & SHF_ALLOC))
         continue;
 
       this->sections[i] = std::make_unique<InputSection<E>>(ctx, *this, i);
@@ -378,7 +378,7 @@ void ObjectFile<E>::initialize_sections(Context<E> &ctx) {
       Fatal(ctx) << *this << ": invalid relocated section index: "
                  << (u32)shdr.sh_info;
 
-    if (std::unique_ptr<InputSection<E>> &target = sections[shdr.sh_info]) {
+    if (std::unique_ptr<InputSection<E>> &target = sections[shdr.sh_info]) { // reference: https://www.cnblogs.com/jiqingwu/p/elf_explore_3.html
       assert(target->relsec_idx == -1);
       target->relsec_idx = i;
     }
@@ -429,17 +429,17 @@ void ObjectFile<E>::parse_ehframe(Context<E> &ctx) {
   i64 rel_idx = 0;
 
   for (std::string_view data = contents; !data.empty();) {
-    i64 size = *(U32<E> *)data.data();
+    i64 size = *(U32<E> *)data.data(); // The first 4 bytes is the length field of CIE/FDE, not including the Length field itself. So size+4 represents the real size of this CIE/FDE.
     if (size == 0)
       break;
 
-    i64 begin_offset = data.data() - contents.data();
-    i64 end_offset = begin_offset + size + 4;
-    i64 id = *(U32<E> *)(data.data() + 4);
-    data = data.substr(size + 4);
+    i64 begin_offset = data.data() - contents.data(); // the begin offset of this CIE/FDE in .eh_frame section
+    i64 end_offset = begin_offset + size + 4; // the end offset of this CIE/FDE
+    i64 id = *(U32<E> *)(data.data() + 4); // the next field behind length field is CIE ID/CIE Pointer.
+    data = data.substr(size + 4); // make data point to the next CIE/FDE.
 
     i64 rel_begin = rel_idx;
-    while (rel_idx < rels.size() && rels[rel_idx].r_offset < end_offset)
+    while (rel_idx < rels.size() && rels[rel_idx].r_offset < end_offset) // r_offset of elf_rel have been sorted in ascending order
       rel_idx++;
     assert(rel_idx == rels.size() || begin_offset <= rels[rel_begin].r_offset);
 
@@ -471,7 +471,7 @@ void ObjectFile<E>::parse_ehframe(Context<E> &ctx) {
   };
 
   for (i64 i = fdes_begin; i < fdes.size(); i++) {
-    i64 cie_offset = *(I32<E> *)(contents.data() + fdes[i].input_offset + 4);
+    i64 cie_offset = *(I32<E> *)(contents.data() + fdes[i].input_offset + 4); // each cie is followed multiple fdes, cie_offset of a fde is the difference between the fde and the cie
     fdes[i].cie_idx = find_cie(fdes[i].input_offset + 4 - cie_offset);
   }
 
@@ -488,7 +488,7 @@ void ObjectFile<E>::parse_ehframe(Context<E> &ctx) {
 
   // Associate FDEs to input sections.
   for (i64 i = fdes_begin; i < fdes.size();) {
-    InputSection<E> *isec = get_isec(fdes[i]);
+    InputSection<E> *isec = get_isec(fdes[i]); // each fde has an elf_rel which is a relocatable entry of a symbol, get the section contains the definition of this symbol. fdes which have same corresponding sections are contiguous.
     assert(isec->fde_begin == -1);
     isec->fde_begin = i++;
 
@@ -519,7 +519,7 @@ static Symbol<E> *insert_symbol(Context<E> &ctx, const ElfSym<E> &esym,
 }
 
 template <typename E>
-void ObjectFile<E>::initialize_symbols(Context<E> &ctx) {
+void ObjectFile<E>::initialize_symbols(Context<E> &ctx) { // resolve all elf_syms in symtab, and store the result in symbols member which contains local and global symbols
   if (!symtab_sec)
     return;
 
@@ -601,7 +601,7 @@ void ObjectFile<E>::sort_relocations(Context<E> &ctx) {
       if (!isec || !isec->is_alive || !(isec->shdr().sh_flags & SHF_ALLOC))
         continue;
 
-      std::span<ElfRel<E>> rels = isec->get_rels(ctx);
+      std::span<ElfRel<E>> rels = isec->get_rels(ctx); // if isec is not relocatable, then rels will be {}
       if (!std::is_sorted(rels.begin(), rels.end(), less))
         sort(rels, less);
     }
@@ -872,16 +872,16 @@ void ObjectFile<E>::parse(Context<E> &ctx) {
     // sh_info has an index of the first global symbol.
     this->first_global = symtab_sec->sh_info;
     this->elf_syms = this->template get_data<ElfSym<E>>(ctx, *symtab_sec);
-    this->symbol_strtab = this->get_string(ctx, symtab_sec->sh_link);
+    this->symbol_strtab = this->get_string(ctx, symtab_sec->sh_link); // get string of symbol string table section. ie, section which type is SHT_STRTAB
 
     if (ElfShdr<E> *shdr = this->find_section(SHT_SYMTAB_SHNDX))
       symtab_shndx_sec = this->template get_data<U32<E>>(ctx, *shdr);
   }
 
-  initialize_sections(ctx);
-  initialize_symbols(ctx);
-  sort_relocations(ctx);
-  parse_ehframe(ctx);
+  initialize_sections(ctx); // resolve all members of ObjectFile
+  initialize_symbols(ctx); // resolve all elf_syms in symtab, and store the result in symbols member which contains local and global symbols
+  sort_relocations(ctx); // sort entries of relocatable section by r_offset
+  parse_ehframe(ctx); // parse cies and fdes in .eh_frame section
 }
 
 // Symbols with higher priorities overwrites symbols with lower priorities.
