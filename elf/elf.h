@@ -55,10 +55,10 @@ enum : u32 {
 };
 
 enum : u32 {
-  SHN_UNDEF = 0,
+  SHN_UNDEF = 0, // this symbol is used in this objectfile, but not defined at this objectfile
   SHN_LORESERVE = 0xff00,
-  SHN_ABS = 0xfff1,
-  SHN_COMMON = 0xfff2,
+  SHN_ABS = 0xfff1, // symbol has absolute value, e.g., symbol corresponding to file's name. SHN_ABS symbol does not belong to any input_section
+  SHN_COMMON = 0xfff2, // e.g., uninitialized global variable
   SHN_XINDEX = 0xffff,
 };
 
@@ -1627,7 +1627,7 @@ struct ElfRel<E> {
 
   Word<E> r_offset;
   std::conditional_t<E::is_64, U32<E>, u8> r_type;
-  std::conditional_t<E::is_64, U32<E>, U24<E>> r_sym;
+  std::conditional_t<E::is_64, U32<E>, U24<E>> r_sym; // the index of symtab of this reloc's symbol
   IWord<E> r_addend;
 };
 

@@ -643,7 +643,14 @@ int elf_main(int argc, char **argv) {
   Timer t_copy(ctx, "copy");
 
   // Copy input sections to the output file and apply relocations.
+  
+#if MOLD_LOONGARCH64 || MOLD_LOONGARCH32
+  // Copy input sections to the output file and apply relaxation
   copy_chunks(ctx);
+
+  // Apply relocation
+  apply_relocate(ctx);
+#endif
 
   if (ctx.arg.z_rewrite_endbr)
     rewrite_endbr(ctx);

@@ -229,9 +229,144 @@ void EhFrameSection<E>::apply_eh_reloc(Context<E> &ctx, const ElfRel<E> &rel,
   }
 }
 
+static void
+putl32(u32 val, u8 *loc) {
+  loc[0] = val & 0xff;
+  loc[1] = (val >> 8) & 0xff;
+  loc[2] = (val >> 16) & 0xff;
+  loc[3] = (val >> 24) & 0xff;
+}
+
+// when delete bytes, we need to update both InputSection and OutputSection
+template <typename E>
+static bool
+loongarch_relax_delete_bytes(Context<E> &ctx, InputSection<E> *sec, u64 addr, u64 count, u8 *contents) { // content is in outputsection
+    u64 i;
+    u64 sec_shndx = sec->shndx;
+    u64 toaddr = sec->sh_size;
+    ElfShdr<E> *shdr;
+    if (sec->shndx < sec->file.elf_sections.size())
+	    shdr = &(sec->file.elf_sections[sec->shndx]);
+    else
+	    shdr = &(sec->file.elf_sections2[sec->shndx - sec->file.elf_sections.size()]);
+    shdr->sh_size -= count; // NB: this will not reduce the size of sections of outputfile because the sections of outputfile have been set before apply_reloc_[no]_alloc
+    sec->sh_size -= count;
+    memmove (contents + addr, contents + addr + count, toaddr - addr - count); // the last count bytes will be clear in ref:OutputSection<E>::write_to
+
+    std::span<ElfRel<E>> rels = sec->get_rels(ctx);
+    for (i = 0; i < rels.size(); i++)
+    {
+        if (rels[i].r_offset > addr && rels[i].r_offset < toaddr)
+            rels[i].r_offset -= count;
+    }
+
+  /* Adjust the local symbols defined in this section. */
+  std::vector<Symbol<E> *> &symbols = sec->file.symbols;
+  for (i = 0; i < symbols.size(); i++)
+    {
+      Symbol<E> *sym = symbols[i];
+      ElfSym<E> &esym = sec->file.elf_syms[i];
+      if (esym.is_undef())
+	      continue;
+
+      if (esym.st_shndx == sec_shndx) // According to gdb, esym.st_value is always same with sym->value.
+	{
+	  /* If the symbol is in the range of memory we just moved, we
+	     have to adjust its value. */
+	   if (esym.st_value > addr && esym.st_value <= toaddr)
+      {
+    	  sym->value -= count;
+          esym.st_value -= count;
+      }
+
+	  /* If the symbol *spans* the bytes we just deleted (i.e. its
+	     *end* is in the moved bytes but its *start* isn't), then we
+	     must adjust its size.
+
+	     This test needs to use the original value of st_value, otherwise
+	     we might accidentally decrease size when deleting bytes right
+	     before the symbol.  But since deleted relocs can't span across
+	     symbols, we can't have both a st_value and a st_size decrease,
+	     so it is simpler to just use an else.  */
+	 else if (esym.st_value <= addr
+		   && esym.st_value + esym.st_size > addr
+		   && esym.st_value + esym.st_size <= toaddr)
+      {
+          esym.st_size -= count;
+      }
+	}
+    }
+   
+  return true;
+}
+
+template <class E>
+static bool loongarch_relax_pcala_addi(Context<E> &ctx, InputSection<E> *sec, InputSection<E> *sym_sec, ElfRel<E> *rel_hi, u64 symval,
+                                u64 pc, u8 *contents) { // content is the first byte of InputSection rel_hi belongs to in OutputFile. symval and pc is the relative value from the start address of OutputFile.
+    ElfRel<E> *rel_lo = rel_hi + 2;
+    u32 pca = *(u32 *)(contents + rel_hi->r_offset);
+    u32 add = *(u32 *)(contents + rel_lo->r_offset);
+    u32 rd = pca & 0x1f;
+    u64 max_alignment = 0;
+    u64 ori_pc = pc;
+    for (int i = 0; i < ctx.osec_pool.size(); i++)
+        max_alignment = (u64)(ctx.osec_pool[i]->shdr.sh_addralign) > max_alignment ? (u64)(ctx.osec_pool[i]->shdr.sh_addralign)
+      						  : max_alignment;
+    if (sym_sec->shdr().sh_flags & SHF_WRITE) // If sym_sec is not readonly, then sym_sec not belongs to the fragment which contains rel_sec.
+      {
+        max_alignment = 16384 > max_alignment ? 16384 // TODO(wx): define maxpagesize;
+      						  : max_alignment; // TODO(wx): In loongarch64, info->maxpagesize is 16384, max_alignment:this->shdr.sh_addralign
+        if (symval > pc)
+      pc -= max_alignment;
+        else if (symval < pc)
+      pc += max_alignment;
+      }
+    else
+      if (symval > pc)
+        pc -= max_alignment;
+      else if (symval < pc)
+        pc += max_alignment;
+
+    const uint32_t addi_d = 0x02c00000;
+    const uint32_t pcaddi = 0x18000000;
+  
+    /* Is pcalau12i + addi.d insns?  */
+    if (rel_lo->r_type != R_LARCH_PCALA_LO12
+        || (rel_lo + 1)->r_type != R_LARCH_RELAX
+        || (rel_hi + 1)->r_type != R_LARCH_RELAX
+        || rel_hi->r_offset + 4 != rel_lo->r_offset
+        || (add & addi_d) != addi_d
+        /* Is pcalau12i $rd + addi.d $rd,$rd?  */
+        || (add & 0x1f) != rd
+        || ((add >> 5) & 0x1f) != rd
+        /* Can be relaxed to pcaddi?  */
+        || symval & 0x3 /* 4 bytes align.  */
+        || (long)(symval - pc) < (long)(int32_t)0xffe00000
+        || (long)(symval - pc) > (long)(int32_t)0x1ffffc)
+      return false;
+  
+    pca = pcaddi | rd;
+    //bits(page(val + 0x800) - page(pc), 31, 12)
+    u32 imm = (((symval - ori_pc) >> 2) << 5) & 0x01ffffe0;
+    pca = pca | imm;
+
+    putl32(pca, contents + rel_hi->r_offset);
+   //putl32(0x03400000, contents + rel_lo->r_offset);
+  
+    /* Adjust relocations.  */
+    //rel_hi->r_type = R_LARCH_PCREL20_S2;
+    rel_hi->r_type = R_LARCH_NONE;
+    rel_lo->r_sym = 0;
+    rel_lo->r_type = R_LARCH_NONE;
+  
+    loongarch_relax_delete_bytes (ctx, sec, rel_lo->r_offset, 4, contents);
+  
+    return true;
+}
+
 template <>
-void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
-  std::span<const ElfRel<E>> rels = get_rels(ctx);
+void InputSection<E>::apply_relax(Context<E> &ctx, u8 *base) { // base is the start address of this InputSection in OutputFile. The contents of InputSection has been copied to OutputSection before this function been invoked, now we can modify the contents of OutputSection in this function.
+  std::span<ElfRel<E>> rels = get_rels(ctx);
 
   ElfRel<E> *dynrel = nullptr;
   if (ctx.reldyn)
@@ -239,15 +374,15 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
                            file.reldyn_offset + this->reldyn_offset);
 
   for (i64 i = 0; i < rels.size(); i++) {
-    const ElfRel<E> &rel = rels[i];
+    ElfRel<E> &rel = rels[i];
 
     if (rel.r_type == R_NONE || rel.r_type == R_LARCH_RELAX ||
         rel.r_type == R_LARCH_MARK_LA || rel.r_type == R_LARCH_MARK_PCREL ||
         rel.r_type == R_LARCH_ALIGN)
       continue;
 
-    Symbol<E> &sym = *file.symbols[rel.r_sym];
-    u8 *loc = base + rel.r_offset;
+    Symbol<E> &sym = *file.symbols[rel.r_sym]; // rel.r_sym is the index of file.symbols
+    u8 *loc = base + rel.r_offset; // the absolute address of this reloc, write to loc is write to outputfile
 
     auto check = [&](i64 val, i64 lo, i64 hi) {
       if (val < lo || hi <= val)
@@ -278,9 +413,83 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
       return sym.get_got_idx(ctx);
     };
 
-    u64 S = sym.get_addr(ctx);
+    u64 S = sym.get_addr(ctx); // symval
     u64 A = rel.r_addend;
-    u64 P = get_addr() + rel.r_offset;
+    u64 P = get_addr() + rel.r_offset; // get_addr(): output_section->shdr.sh_addr + offset; loc-P == ctx.buf(start address of OutputFile), i.e., loc is the absolute address of this reloc, P is the relative address of this reloc from the start of OutputFile.
+    u64 G = get_got_idx() * sizeof(Word<E>);
+    u64 GOT = ctx.got->shdr.sh_addr;
+
+    switch (rel.r_type) {
+    case R_LARCH_PCALA_HI20:
+      {
+      // u64 pc = ctx.buf + output_section->shdr.sh_offset + offset + rel.r_offset;
+      InputSection<E> *sym_sec = sym.get_input_section();
+      /* TODO(wx): add:0 == relax_pass*/
+      if (ctx.arg.relax
+          && sym_sec /* undef/abs symbol has no input section */
+          && (i+4) <= rels.size())
+          loongarch_relax_pcala_addi<E>(ctx, this, sym_sec, &rel, S + A, P, loc - rel.r_offset);
+          //write_j20(loc, hi20(S + A, P)); // put hi20(S + A, P) into [24, 5]bits of pcalau12i, which is the part of si20 of 'pcalau12i rd, si20'
+      break;
+      }
+    default:
+      break;
+    }
+  }
+}
+
+template <>
+void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) { // base is the start address of this InputSection in OutputFile. The contents of InputSection has been copied to OutputSection before this function been invoked, now we can modify the contents of OutputSection in this function.
+  std::span<ElfRel<E>> rels = get_rels(ctx);
+
+  ElfRel<E> *dynrel = nullptr;
+  if (ctx.reldyn)
+    dynrel = (ElfRel<E> *)(ctx.buf + ctx.reldyn->shdr.sh_offset +
+                           file.reldyn_offset + this->reldyn_offset);
+
+  for (i64 i = 0; i < rels.size(); i++) {
+    ElfRel<E> &rel = rels[i];
+
+    if (rel.r_type == R_NONE || rel.r_type == R_LARCH_RELAX ||
+        rel.r_type == R_LARCH_MARK_LA || rel.r_type == R_LARCH_MARK_PCREL ||
+        rel.r_type == R_LARCH_ALIGN) // TODO(wx): we need support relax R_LARCH_ALIGN
+      continue;
+
+    Symbol<E> &sym = *file.symbols[rel.r_sym]; // rel.r_sym is the index of file.symbols
+    u8 *loc = base + rel.r_offset; // the absolute address of this reloc, write to loc is write to outputfile
+
+    auto check = [&](i64 val, i64 lo, i64 hi) {
+      if (val < lo || hi <= val)
+        Error(ctx) << *this << ": relocation " << rel << " against "
+                   << sym << " out of range: " << val << " is not in ["
+                   << lo << ", " << hi << ")";
+    };
+
+    auto check_branch = [&](i64 val, i64 lo, i64 hi) {
+      if (val & 0b11)
+        Error(ctx) << *this << ": misaligned symbol " << sym
+                   << " for relocation " << rel;
+      check(val, lo, hi);
+    };
+
+    // Unlike other psABIs, the LoongArch ABI uses the same relocation
+    // types to refer to GOT entries for thread-local symbols and regular
+    // ones. Therefore, G may refer to a TLSGD or a regular GOT slot
+    // depending on the symbol type.
+    //
+    // Note that as of August 2023, both GCC and Clang treat TLSLD relocs
+    // as if they were TLSGD relocs for LoongArch, which is a clear bug.
+    // We need to handle TLSLD relocs as synonyms for TLSGD relocs for the
+    // sake of bug compatibility.
+    auto get_got_idx = [&] {
+      if (sym.has_tlsgd(ctx))
+        return sym.get_tlsgd_idx(ctx);
+      return sym.get_got_idx(ctx);
+    };
+
+    u64 S = sym.get_addr(ctx); // symval
+    u64 A = rel.r_addend;
+    u64 P = get_addr() + rel.r_offset; // get_addr(): output_section->shdr.sh_addr + offset; loc-P == ctx.buf(start address of OutputFile), i.e., loc is the absolute address of this reloc, P is the relative address of this reloc from the start of OutputFile.
     u64 G = get_got_idx() * sizeof(Word<E>);
     u64 GOT = ctx.got->shdr.sh_addr;
 
@@ -330,10 +539,10 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
       if ((*(ul32 *)loc & 0xfc00'0000) == 0x4c00'0000)
         write_k16(loc, sign_extend(S + A, 11) >> 2);
       else
-        write_k12(loc, S + A);
+        write_k12(loc, S + A); // put (S + A) into [11, 0]bits of addi.d, which is the part of si12 of 'addi.d rd, rj, si12'
       break;
     case R_LARCH_PCALA_HI20:
-      write_j20(loc, hi20(S + A, P));
+      write_j20(loc, hi20(S + A, P)); // put hi20(S + A, P) into [24, 5]bits of pcalau12i, which is the part of si20 of 'pcalau12i rd, si20'
       break;
     case R_LARCH_PCALA64_LO20:
       write_j20(loc, higher20(S + A, P));

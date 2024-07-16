@@ -1647,6 +1647,28 @@ void copy_chunks(Context<E> &ctx) {
   zero(chunks.back(), ctx.output_file->filesize);
 }
 
+// Apply relax on each OutputSection
+template <typename E>
+void apply_relocate(Context<E> &ctx) {
+  Timer t(ctx, "apply_relocate");
+
+  tbb::parallel_for_each(ctx.chunks, [&](Chunk<E> *chunk) {
+    OutputSection<E> *osec = dynamic_cast<OutputSection<E> *> (chunk);
+    if (chunk->shdr.sh_type != SHT_REL && osec != nullptr)
+    {
+        osec->apply_relocate(ctx);
+    }
+  });
+
+  tbb::parallel_for_each(ctx.chunks, [&](Chunk<E> *chunk) {
+    OutputSection<E> *osec = dynamic_cast<OutputSection<E> *> (chunk);
+    if (chunk->shdr.sh_type == SHT_REL && osec != nullptr)
+    {
+        osec->apply_relocate(ctx);
+    }
+  });
+}
+
 // Rewrite the leading endbr64 instruction with a nop if a function
 // symbol's address was not taken.
 template <typename E>
@@ -3221,6 +3243,7 @@ template void scan_relocations(Context<E> &);
 template void report_undef_errors(Context<E> &);
 template void create_reloc_sections(Context<E> &);
 template void copy_chunks(Context<E> &);
+template void apply_relocate(Context<E> &);
 template void rewrite_endbr(Context<E> &);
 template void construct_relr(Context<E> &);
 template void create_output_symtab(Context<E> &);

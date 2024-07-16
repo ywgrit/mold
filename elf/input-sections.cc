@@ -42,7 +42,7 @@ InputSection<E>::InputSection(Context<E> &ctx, ObjectFile<E> &file, i64 shndx)
   if (shndx < file.elf_sections.size())
     contents = {(char *)file.mf->data + shdr().sh_offset, (size_t)shdr().sh_size};
 
-  if (shdr().sh_flags & SHF_COMPRESSED) {
+  if (shdr().sh_flags & SHF_COMPRESSED) { // only debug sections could be compressed
     ElfChdr<E> &chdr = *(ElfChdr<E> *)&contents[0];
     sh_size = chdr.ch_size;
     p2align = to_p2align(chdr.ch_addralign);
@@ -459,13 +459,18 @@ void InputSection<E>::write_to(Context<E> &ctx, u8 *buf) {
   else
     copy_contents(ctx, buf);
 
-  // Apply relocations
-  if (!ctx.arg.relocatable) {
-    if (shdr().sh_flags & SHF_ALLOC)
-      apply_reloc_alloc(ctx, buf);
-    else
-      apply_reloc_nonalloc(ctx, buf);
-  }
+  /* // Apply relocations */
+  /* if (!ctx.arg.relocatable) { */
+  /*   if (shdr().sh_flags & SHF_ALLOC) */
+  /*     apply_reloc_alloc(ctx, buf); */
+  /*   else */
+  /*     apply_reloc_nonalloc(ctx, buf); */
+  /* } */
+  
+  // Apply relaxation
+#if MOLD_LOONGARCH64 || MOLD_LOONGARCH32
+  apply_relax(ctx, buf);
+#endif
 }
 
 // Get the name of a function containin a given offset.

@@ -944,7 +944,7 @@ void OutputSection<E>::compute_section_size(Context<E> &ctx) {
 }
 
 template <typename E>
-void OutputSection<E>::copy_buf(Context<E> &ctx) {
+void OutputSection<E>::copy_buf(Context<E> &ctx) { // This routine is invoked by elf/passes.cc:1699
   if (this->shdr.sh_type != SHT_NOBITS)
     write_to(ctx, ctx.buf + this->shdr.sh_offset);
 }
@@ -954,7 +954,7 @@ void OutputSection<E>::write_to(Context<E> &ctx, u8 *buf) {
   tbb::parallel_for((i64)0, (i64)members.size(), [&](i64 i) {
     // Copy section contents to an output file.
     InputSection<E> &isec = *members[i];
-    isec.write_to(ctx, buf + isec.offset);
+    isec.write_to(ctx, buf + isec.offset); // buf is the address in outputfile¬
 
     // Clear trailing padding. We write trap or nop instructions for
     // an executable segment so that a disassembler wouldn't try to
@@ -971,7 +971,7 @@ void OutputSection<E>::write_to(Context<E> &ctx, u8 *buf) {
 
     if (this->shdr.sh_flags & SHF_EXECINSTR) {
       for (i64 i = 0; i + sizeof(E::filler) <= size; i += sizeof(E::filler))
-        memcpy(loc + i, E::filler, sizeof(E::filler));
+        memcpy(loc + i, E::filler, sizeof(E::filler)); // For loongarch64, E::filler is 0x002a0000, which is "break 0"
     } else {
       memset(loc, 0, size);
     }
@@ -982,6 +982,25 @@ void OutputSection<E>::write_to(Context<E> &ctx, u8 *buf) {
       thunk->copy_buf(ctx);
     });
   }
+}
+
+template <typename E>
+void OutputSection<E>::apply_relocate(Context<E> &ctx) {
+  if (this->shdr.sh_type == SHT_NOBITS)
+    return;
+
+  u8 *buf = ctx.buf + this->shdr.sh_offset;
+  tbb::parallel_for((i64)0, (i64)members.size(), [&](i64 i) {
+    // Copy section contents to an output file.
+    InputSection<E> &isec = *members[i];
+    if (!ctx.arg.relocatable) {
+      if (isec.shdr().sh_flags & SHF_ALLOC)
+        isec.apply_reloc_alloc(ctx, buf + isec.offset); // Now we know that relocation is executed when copy inputsections to outputsections.
+      else
+        isec.apply_reloc_nonalloc(ctx, buf + isec.offset);
+    }
+    /* isec.write_to(ctx, buf + isec.offset); // buf is the address in outputfile */
+  });
 }
 
 // .relr.dyn contains base relocations encoded in a space-efficient form.

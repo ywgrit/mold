@@ -252,6 +252,7 @@ public:
   void copy_contents(Context<E> &ctx, u8 *buf);
   void scan_relocations(Context<E> &ctx);
   void write_to(Context<E> &ctx, u8 *buf);
+  void apply_relax(Context<E> &ctx, u8 *base);
   void apply_reloc_alloc(Context<E> &ctx, u8 *base);
   void apply_reloc_nonalloc(Context<E> &ctx, u8 *base);
   void kill();
@@ -270,20 +271,20 @@ public:
   std::pair<SectionFragment<E> *, i64>
   get_fragment(Context<E> &ctx, const ElfRel<E> &rel);
 
-  ObjectFile<E> &file;
-  OutputSection<E> *output_section = nullptr;
+  ObjectFile<E> &file; // file this InputSection belongs to
+  OutputSection<E> *output_section = nullptr; // The section of output file which this inputsection will map to.
   i64 sh_size = -1;
 
-  std::string_view contents;
+  std::string_view contents; // be assigned in initialization function.
 
   [[no_unique_address]] InputSectionExtras<E> extra;
 
   i32 fde_begin = -1;
   i32 fde_end = -1;
 
-  i64 offset = -1;
+  i64 offset = -1; // The distance between the first byte of this InputSection with the first byte of corresponding OutputSection.
   i32 shndx = -1;
-  i32 relsec_idx = -1;
+  i32 relsec_idx = -1; // only meaningful when this section is reloc section
   i32 reldyn_offset = 0;
 
   bool uncompressed = false;
@@ -484,6 +485,7 @@ public:
   void construct_relr(Context<E> &ctx) override;
   void copy_buf(Context<E> &ctx) override;
   void write_to(Context<E> &ctx, u8 *buf) override;
+  void apply_relocate(Context<E> &ctx);
 
   void compute_symtab_size(Context<E> &ctx) override;
   void populate_symtab(Context<E> &ctx) override;
@@ -491,7 +493,7 @@ public:
   void create_range_extension_thunks(Context<E> &ctx);
 
   std::vector<InputSection<E> *> members;
-  std::vector<std::unique_ptr<Thunk<E>>> thunks;
+  std::vector<std::unique_ptr<Thunk<E>>> thunks; // ref: the comments on top of elf/thunks.cc
   std::unique_ptr<RelocSection<E>> reloc_sec;
   Atomic<u32> sh_flags;
 };
@@ -1165,9 +1167,9 @@ public:
   std::string_view get_source_name() const;
 
   MappedFile *mf = nullptr;
-  std::span<ElfShdr<E>> elf_sections;
-  std::span<ElfSym<E>> elf_syms;
-  std::vector<Symbol<E> *> symbols;
+  std::span<ElfShdr<E>> elf_sections; // headers of all sections of this InputFile
+  std::span<ElfSym<E>> elf_syms; // parsed data of symtab, ref:ObjectFile<E>::parse
+  std::vector<Symbol<E> *> symbols; // all symbols in this file. This is initialized from elf_syms in ObjectFile<E>::initialize_symbols, i.e., symbols.size() == elf_syms.size()
   i64 first_global = 0;
 
   std::string filename;
@@ -1242,7 +1244,7 @@ public:
   std::vector<ElfShdr<E>> elf_sections2;
   std::vector<CieRecord<E>> cies;
   std::vector<FdeRecord<E>> fdes;
-  BitVector has_symver;
+  BitVector has_symver; // number of bit == number of global symbol defined in this ObjectFile, bit == 1: this global symbol's name contains version information, i.e., this global symbol's name is 'name@version' or 'name@@version'
   std::vector<ComdatGroupRef<E>> comdat_groups;
   std::vector<InputSection<E> *> eh_frame_sections;
   bool exclude_libs = false;
@@ -1490,6 +1492,7 @@ template <typename E> void create_output_symtab(Context<E> &);
 template <typename E> void report_undef_errors(Context<E> &);
 template <typename E> void create_reloc_sections(Context<E> &);
 template <typename E> void copy_chunks(Context<E> &);
+template <typename E> void apply_relocate(Context<E> &);
 template <typename E> void rewrite_endbr(Context<E> &);
 template <typename E> void apply_version_script(Context<E> &);
 template <typename E> void parse_symbol_version(Context<E> &);
@@ -1899,7 +1902,7 @@ struct Context {
   i64 file_priority = 10000;
 
   // Symbol table
-  tbb::concurrent_hash_map<std::string_view, Symbol<E>, HashCmp> symbol_map;
+  tbb::concurrent_hash_map<std::string_view, Symbol<E>, HashCmp> symbol_map; // store global symbol, when we record global symbol's information, insert a tuple into this symbol_map if we meet a new symbol name.
   tbb::concurrent_hash_map<std::string_view, ComdatGroup, HashCmp> comdat_groups;
   tbb::concurrent_vector<std::unique_ptr<MergedSection<E>>> merged_sections;
 
@@ -2078,7 +2081,7 @@ enum {
 //
 // A symbol has not only one but several different addresses if it
 // has PLT or GOT entries. This class provides various functions to
-// compute different addresses.
+// compute different addresses. NB:except undef symbols, all symbols's(include global symbol) have been set, e.g., global symbol's file/value/sym_idx is meaningful
 template <typename E>
 class Symbol {
 public:
@@ -2180,7 +2183,7 @@ public:
   static_assert(alignof(Chunk<E>) >= 4);
   static_assert(alignof(SectionFragment<E>) >= 4);
 
-  uintptr_t origin = 0;
+  uintptr_t origin = 0; // origin is a pointer which points to InputSection<E>
 
   // `value` contains symbol value. If it's an absolute symbol, it is
   // equivalent to its address. If it belongs to an input section or a
@@ -2405,7 +2408,7 @@ inline const ElfShdr<E> &InputSection<E>::shdr() const {
 
 template <typename E>
 inline std::span<ElfRel<E>> InputSection<E>::get_rels(Context<E> &ctx) const {
-  if (relsec_idx == -1)
+  if (relsec_idx == -1) // this section is not reloc section
     return {};
   return file.template get_data<ElfRel<E>>(ctx, file.elf_sections[relsec_idx]);
 }
