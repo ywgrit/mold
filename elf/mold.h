@@ -245,7 +245,7 @@ struct InputSectionExtras<E> {
 template <is_loongarch E>
 struct InputSectionExtras<E> {
   std::vector<ThunkRef> thunk_refs;
-  std::vector<i32> r_deltas;
+  std::vector<i32> r_deltas; // r_deltas[i]: the number of removed bytes before relocs[i]
 };
 
 // InputSection represents a section in an input object file.

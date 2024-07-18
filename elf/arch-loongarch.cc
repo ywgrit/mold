@@ -983,7 +983,10 @@ static void shrink_section(Context<E> &ctx, InputSection<E> &isec) {
       rels[i+2].r_sym = 0;
       rels[i+2].r_type = R_LARCH_NONE;
 
+      // NOTE: we should set delta of all rels of this symbol, and the index
+      isec.extra.r_deltas[i+1] = isec.extra.r_deltas[i+2] = isec.extra.r_deltas[i+3] = delta;
       delta += 4;
+      i += 3;
       break;
     }
     }
