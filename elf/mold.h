@@ -229,16 +229,19 @@ struct FdeRecord {
 };
 
 // A struct to hold target-dependent input section members.
-template <typename E>
-struct InputSectionExtras {};
-
-template <needs_thunk E>
+template <typename E> requires (!is_loongarch<E>) && needs_thunk<E>
 struct InputSectionExtras<E> {
   std::vector<ThunkRef> thunk_refs;
 };
 
 template <is_riscv E>
 struct InputSectionExtras<E> {
+  std::vector<i32> r_deltas;
+};
+
+template <is_loongarch E>
+struct InputSectionExtras<E> {
+  std::vector<ThunkRef> thunk_refs;
   std::vector<i32> r_deltas;
 };
 
@@ -326,6 +329,7 @@ private:
                      u8 *loc, u64 S, i64 A, u64 P, ElfRel<E> **dynrel);
 
   void copy_contents_riscv(Context<E> &ctx, u8 *buf);
+  void copy_contents_loongarch(Context<E> &ctx, u8 *buf);
 
   u64 get_thunk_addr(i64 idx);
 
@@ -1634,6 +1638,12 @@ private:
   std::vector<Entry> entries;
   std::mutex mu;
 };
+
+//
+// arch-loongarch.cc
+//
+template <is_loongarch E>
+i64 loongarch_resize_sections(Context<E> &ctx);
 
 //
 // main.cc

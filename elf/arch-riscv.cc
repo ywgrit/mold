@@ -955,7 +955,7 @@ static void shrink_section(Context<E> &ctx, InputSection<E> &isec, bool use_rvc)
 
   i64 delta = 0;
 
-  for (i64 i = 0; i < rels.size(); i++) {
+  for (i64 i = 0; i < rels.size(); i++) { // rels are ordered by r_offset
     const ElfRel<E> &r = rels[i];
     Symbol<E> &sym = *isec.file.symbols[r.r_sym];
     isec.extra.r_deltas[i] = delta;
