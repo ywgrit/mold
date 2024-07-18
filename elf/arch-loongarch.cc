@@ -369,82 +369,8 @@ static bool loongarch_relax_pcala_addi(Context<E> &ctx, InputSection<E> *sec, In
 }
 
 template <>
-void InputSection<E>::apply_relax(Context<E> &ctx, u8 *base) { // base is the start address of this InputSection in OutputFile. The contents of InputSection has been copied to OutputSection before this function been invoked, now we can modify the contents of OutputSection in this function.
-  std::span<ElfRel<E>> rels = get_rels(ctx);
-
-  ElfRel<E> *dynrel = nullptr;
-  if (ctx.reldyn)
-    dynrel = (ElfRel<E> *)(ctx.buf + ctx.reldyn->shdr.sh_offset +
-                           file.reldyn_offset + this->reldyn_offset);
-
-  for (i64 i = 0; i < rels.size(); i++) {
-    ElfRel<E> &rel = rels[i];
-
-    if (rel.r_type == R_NONE || rel.r_type == R_LARCH_RELAX ||
-        rel.r_type == R_LARCH_MARK_LA || rel.r_type == R_LARCH_MARK_PCREL ||
-        rel.r_type == R_LARCH_ALIGN)
-      continue;
-
-    Symbol<E> &sym = *file.symbols[rel.r_sym]; // rel.r_sym is the index of file.symbols
-    u8 *loc = base + rel.r_offset; // the absolute address of this reloc, write to loc is write to outputfile
-
-    auto check = [&](i64 val, i64 lo, i64 hi) {
-      if (val < lo || hi <= val)
-        Error(ctx) << *this << ": relocation " << rel << " against "
-                   << sym << " out of range: " << val << " is not in ["
-                   << lo << ", " << hi << ")";
-    };
-
-    auto check_branch = [&](i64 val, i64 lo, i64 hi) {
-      if (val & 0b11)
-        Error(ctx) << *this << ": misaligned symbol " << sym
-                   << " for relocation " << rel;
-      check(val, lo, hi);
-    };
-
-    // Unlike other psABIs, the LoongArch ABI uses the same relocation
-    // types to refer to GOT entries for thread-local symbols and regular
-    // ones. Therefore, G may refer to a TLSGD or a regular GOT slot
-    // depending on the symbol type.
-    //
-    // Note that as of August 2023, both GCC and Clang treat TLSLD relocs
-    // as if they were TLSGD relocs for LoongArch, which is a clear bug.
-    // We need to handle TLSLD relocs as synonyms for TLSGD relocs for the
-    // sake of bug compatibility.
-    auto get_got_idx = [&] {
-      if (sym.has_tlsgd(ctx))
-        return sym.get_tlsgd_idx(ctx);
-      return sym.get_got_idx(ctx);
-    };
-
-    u64 S = sym.get_addr(ctx); // symval
-    u64 A = rel.r_addend;
-    u64 P = get_addr() + rel.r_offset; // get_addr(): output_section->shdr.sh_addr + offset; loc-P == ctx.buf(start address of OutputFile), i.e., loc is the absolute address of this reloc, P is the relative address of this reloc from the start of OutputFile.
-    u64 G = get_got_idx() * sizeof(Word<E>);
-    u64 GOT = ctx.got->shdr.sh_addr;
-
-    switch (rel.r_type) {
-    case R_LARCH_PCALA_HI20:
-      {
-      // u64 pc = ctx.buf + output_section->shdr.sh_offset + offset + rel.r_offset;
-      InputSection<E> *sym_sec = sym.get_input_section();
-      /* TODO(wx): add:0 == relax_pass*/
-      if (ctx.arg.relax
-          && sym_sec /* undef/abs symbol has no input section */
-          && (i+4) <= rels.size())
-          loongarch_relax_pcala_addi<E>(ctx, this, sym_sec, &rel, S + A, P, loc - rel.r_offset);
-          //write_j20(loc, hi20(S + A, P)); // put hi20(S + A, P) into [24, 5]bits of pcalau12i, which is the part of si20 of 'pcalau12i rd, si20'
-      break;
-      }
-    default:
-      break;
-    }
-  }
-}
-
-template <>
 void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) { // base is the start address of this InputSection in OutputFile. The contents of InputSection has been copied to OutputSection before this function been invoked, now we can modify the contents of OutputSection in this function.
-  std::span<ElfRel<E>> rels = get_rels(ctx);
+  std::span<const ElfRel<E>> rels = get_rels(ctx);
 
   ElfRel<E> *dynrel = nullptr;
   if (ctx.reldyn)
@@ -452,7 +378,7 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) { // base is 
                            file.reldyn_offset + this->reldyn_offset);
 
   for (i64 i = 0; i < rels.size(); i++) {
-    ElfRel<E> &rel = rels[i];
+    const ElfRel<E> &rel = rels[i];
 
     if (rel.r_type == R_NONE || rel.r_type == R_LARCH_RELAX ||
         rel.r_type == R_LARCH_MARK_LA || rel.r_type == R_LARCH_MARK_PCREL ||

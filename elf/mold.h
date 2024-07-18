@@ -258,7 +258,6 @@ public:
   void copy_contents(Context<E> &ctx, u8 *buf);
   void scan_relocations(Context<E> &ctx);
   void write_to(Context<E> &ctx, u8 *buf);
-  void apply_relax(Context<E> &ctx, u8 *base);
   void apply_reloc_alloc(Context<E> &ctx, u8 *base);
   void apply_reloc_nonalloc(Context<E> &ctx, u8 *base);
   void kill();
