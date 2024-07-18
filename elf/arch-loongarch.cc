@@ -1064,7 +1064,7 @@ static void shrink_section(Context<E> &ctx, InputSection<E> &isec) {
   }
 
   isec.extra.r_deltas[len] = delta;
-  isec.sh_size -= delta;
+  /* isec.sh_size -= delta; */
 }
 
 template <>
