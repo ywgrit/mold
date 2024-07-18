@@ -954,43 +954,44 @@ static void shrink_section(Context<E> &ctx, InputSection<E> &isec) {
     // R_LARCH_ALIGN refers to NOP instructions. We need to eliminate some
     // or all of the instructions so that the instruction that immediately
     // follows the NOPs is aligned to a specified alignment boundary.
-    if (r.r_type == R_LARCH_ALIGN) { // TODO(wx): we need to make sure that no other relaxation applied after align relaxation
-      // The total bytes of NOPs is stored to r_addend, so the next
-      // instruction is r_addend away.
-      u64 loc = isec.get_addr() + r.r_offset - delta; // NOTE: we can not adjust r_offset, as relocate and copy_contents_loongarch both use old r_offset.
-      u64 addend, alignment, max = 0;
-      /* For R_LARCH_ALIGN, symval is sec_addr (sec) + rel->r_offset
-	 + (alingmeng - 4).
-	 If r_symndx is 0, alignmeng-4 is r_addend.
-	 If r_symndx > 0, alignment-4 is 2^(r_addend & 0xff)-4.  */
-      if (r.r_sym > 0) {
-          alignment = 1 << (r.r_addend & 0xff);
-          max = r.r_addend >> 8;
-      }
-      else
-          alignment = r.r_addend + 4;
-      addend = alignment - 4; /* The bytes of NOPs added by R_LARCH_ALIGN.  */
-      u64 next_loc = loc + addend;
-      assert(alignment <= (1 << isec.p2align));
-      u64 aligned_addr = ((loc - 1) & ~(alignment - 1)) + alignment;
-      u64 need_nop_bytes = aligned_addr - loc; /* */
 
-      if (addend < need_nop_bytes) {
-        Error(ctx) << file << ": align relax, " << need_nop_bytes
-                   << " bytes required for alignment to " << alignment
-                   << "-byte boundary, but only " << addend << " present";
-      }
+    /* if (r.r_type == R_LARCH_ALIGN) { // TODO(wx): we need to make sure that no other relaxation applied after align relaxation */
+    /*   // The total bytes of NOPs is stored to r_addend, so the next */
+    /*   // instruction is r_addend away. */
+    /*   u64 loc = isec.get_addr() + r.r_offset - delta; // NOTE: we can not adjust r_offset, as relocate and copy_contents_loongarch both use old r_offset. */
+    /*   u64 addend, alignment, max = 0; */
+    /*   /1* For R_LARCH_ALIGN, symval is sec_addr (sec) + rel->r_offset */
+	 /* + (alingmeng - 4). */
+	 /* If r_symndx is 0, alignmeng-4 is r_addend. */
+	 /* If r_symndx > 0, alignment-4 is 2^(r_addend & 0xff)-4.  *1/ */
+    /*   if (r.r_sym > 0) { */
+    /*       alignment = 1 << (r.r_addend & 0xff); */
+    /*       max = r.r_addend >> 8; */
+    /*   } */
+    /*   else */
+    /*       alignment = r.r_addend + 4; */
+    /*   addend = alignment - 4; /1* The bytes of NOPs added by R_LARCH_ALIGN.  *1/ */
+    /*   u64 next_loc = loc + addend; */
+    /*   assert(alignment <= (1 << isec.p2align)); */
+    /*   u64 aligned_addr = ((loc - 1) & ~(alignment - 1)) + alignment; */
+    /*   u64 need_nop_bytes = aligned_addr - loc; /1* *1/ */
 
-      r.r_type = R_LARCH_NONE;
+    /*   if (addend < need_nop_bytes) { */
+    /*     Error(ctx) << file << ": align relax, " << need_nop_bytes */
+    /*                << " bytes required for alignment to " << alignment */
+    /*                << "-byte boundary, but only " << addend << " present"; */
+    /*   } */
 
-      /* If skipping more bytes than the specified maximum,
-         then the alignment is not done at all and delete all NOPs.  */
-      if (max > 0 && need_nop_bytes > max)
-          delta += addend;
-      else
-          delta += addend - need_nop_bytes;
-      continue;
-    }
+    /*   r.r_type = R_LARCH_NONE; */
+
+    /*   /1* If skipping more bytes than the specified maximum, */
+    /*      then the alignment is not done at all and delete all NOPs.  *1/ */
+    /*   if (max > 0 && need_nop_bytes > max) */
+    /*       delta += addend; */
+    /*   else */
+    /*       delta += addend - need_nop_bytes; */
+    /*   continue; */
+    /* } */
 
     // Handling other relocations is optional.
     if (!ctx.arg.relax || i == len - 1 ||
@@ -1005,27 +1006,8 @@ static void shrink_section(Context<E> &ctx, InputSection<E> &isec) {
     if (sym.file == ctx.internal_obj)
       continue;
 
-    /* auto find_paired_reloc = [&] { */
-    /*   if (sym.value <= rels[i].r_offset) { */
-    /*     for (i64 j = i - 1; j >= 0; j--) */
-    /*       if (is_hi20(rels[j]) && sym.value == rels[j].r_offset) */
-    /*         return j; */
-    /*   } else { */
-    /*     for (i64 j = i + 1; j < rels.size(); j++) */
-    /*       if (is_hi20(rels[j]) && sym.value == rels[j].r_offset) */
-    /*         return j; */
-    /*   } */
-
-    /*   Fatal(ctx) << isec << ": paired relocation is missing: " << i; */
-    /* }; */
 
     switch (r.r_type) {
-	/* case R_LARCH_TLS_LE_HI20_R: */
-    /* case R_LARCH_TLS_LE_ADD_R: { */
-      /* // TODO(wx): if the distance between loc and tls_sec >= 0x800, continue; */
-      /* r.r_type = R_LARCH_NONE; */
-      /* delta += 4; */
-    /* } */
     case R_LARCH_PCALA_HI20: {
       if ((i + 4) > len)
         continue;
