@@ -979,9 +979,9 @@ static void shrink_section(Context<E> &ctx, InputSection<E> &isec) {
           || (long)(symval - pc) > (long)(int32_t)0x1ffffc)
         continue;
 
-      /* r.r_type = R_LARCH_PCREL20_S2; // TODO(wx): in relocate, we need to modify opc and imm, rd. */
-      /* rels[i+2].r_sym = 0; */
-      /* rels[i+2].r_type = R_LARCH_NONE; */
+      r.r_type = R_LARCH_PCREL20_S2; // TODO(wx): in relocate, we need to modify opc and imm, rd.
+      rels[i+2].r_sym = 0;
+      rels[i+2].r_type = R_LARCH_NONE;
 
       delta += 4;
       break;
@@ -990,7 +990,7 @@ static void shrink_section(Context<E> &ctx, InputSection<E> &isec) {
   }
 
   isec.extra.r_deltas[len] = delta;
-  /* isec.sh_size -= delta; */
+  isec.sh_size -= delta;
 }
 
 template <>
@@ -1021,7 +1021,7 @@ i64 loongarch_resize_sections<E>(Context<E> &ctx) {
         return r.r_offset < val;
       });
 
-      /* sym->value -= isec->extra.r_deltas[it - rels.begin()]; */
+      sym->value -= isec->extra.r_deltas[it - rels.begin()];
     }
   });
 
