@@ -784,7 +784,7 @@ void InputSection<E>::copy_contents_loongarch(Context<E> &ctx, u8 *buf) {
   i64 pos = 0;
 
   for (i64 i = 0; i < rels.size(); i++) {
-    i64 delta = extra.r_deltas[i + 1] - extra.r_deltas[i];
+    i64 delta = extra.r_deltas[i + 1] - extra.r_deltas[i]; // The number of bytes removed from current rel to next rel.
     if (delta == 0)
       continue;
     assert(delta > 0);
@@ -1095,7 +1095,7 @@ i64 loongarch_resize_sections<E>(Context<E> &ctx) {
         return r.r_offset < val;
       });
 
-      sym->value -= isec->extra.r_deltas[it - rels.begin()];
+      /* sym->value -= isec->extra.r_deltas[it - rels.begin()]; */
     }
   });
 
