@@ -673,6 +673,8 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) { // base is 
       break;
     case R_LARCH_TLS_LE_ADD_R:
       break;
+    case R_LARCH_PCREL20_S2: // TODO(wx): we need to modify pcalau12i to pcaddi
+      break;
     default:
       unreachable();
     }
@@ -1092,7 +1094,7 @@ i64 loongarch_resize_sections<E>(Context<E> &ctx) {
   tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
     for (std::unique_ptr<InputSection<E>> &isec : file->sections)
       if (is_resizable(isec.get()))
-        shrink_section(ctx, *isec, use_rvc);
+        shrink_section(ctx, *isec);
   });
 
   // Fix symbol values.

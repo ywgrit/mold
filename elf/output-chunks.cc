@@ -984,25 +984,6 @@ void OutputSection<E>::write_to(Context<E> &ctx, u8 *buf) {
   }
 }
 
-template <typename E>
-void OutputSection<E>::apply_relocate(Context<E> &ctx) {
-  if (this->shdr.sh_type == SHT_NOBITS)
-    return;
-
-  u8 *buf = ctx.buf + this->shdr.sh_offset;
-  tbb::parallel_for((i64)0, (i64)members.size(), [&](i64 i) {
-    // Copy section contents to an output file.
-    InputSection<E> &isec = *members[i];
-    if (!ctx.arg.relocatable) {
-      if (isec.shdr().sh_flags & SHF_ALLOC)
-        isec.apply_reloc_alloc(ctx, buf + isec.offset); // Now we know that relocation is executed when copy inputsections to outputsections.
-      else
-        isec.apply_reloc_nonalloc(ctx, buf + isec.offset);
-    }
-    /* isec.write_to(ctx, buf + isec.offset); // buf is the address in outputfile */
-  });
-}
-
 // .relr.dyn contains base relocations encoded in a space-efficient form.
 // The contents of the section is essentially just a list of addresses
 // that have to be fixed up at runtime.

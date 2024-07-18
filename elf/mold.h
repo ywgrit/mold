@@ -229,6 +229,9 @@ struct FdeRecord {
 };
 
 // A struct to hold target-dependent input section members.
+template <typename E>
+struct InputSectionExtras {};
+
 template <typename E> requires (!is_loongarch<E>) && needs_thunk<E>
 struct InputSectionExtras<E> {
   std::vector<ThunkRef> thunk_refs;
@@ -489,7 +492,6 @@ public:
   void construct_relr(Context<E> &ctx) override;
   void copy_buf(Context<E> &ctx) override;
   void write_to(Context<E> &ctx, u8 *buf) override;
-  void apply_relocate(Context<E> &ctx);
 
   void compute_symtab_size(Context<E> &ctx) override;
   void populate_symtab(Context<E> &ctx) override;
@@ -1496,7 +1498,6 @@ template <typename E> void create_output_symtab(Context<E> &);
 template <typename E> void report_undef_errors(Context<E> &);
 template <typename E> void create_reloc_sections(Context<E> &);
 template <typename E> void copy_chunks(Context<E> &);
-template <typename E> void apply_relocate(Context<E> &);
 template <typename E> void rewrite_endbr(Context<E> &);
 template <typename E> void apply_version_script(Context<E> &);
 template <typename E> void parse_symbol_version(Context<E> &);
