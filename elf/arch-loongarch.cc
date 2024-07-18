@@ -1008,58 +1008,58 @@ static void shrink_section(Context<E> &ctx, InputSection<E> &isec) {
 
 
     switch (r.r_type) {
-    /* case R_LARCH_PCALA_HI20: { */
-    /*   if ((i + 4) > len) */
-    /*     continue; */
+    case R_LARCH_PCALA_HI20: {
+      if ((i + 4) > len)
+        continue;
 
-    /*   u32 pca = *(u32 *)(isec.contents.data() + r.r_offset); // do not sub delta, as the contents has not been moved yet. */
-    /*   u32 add = *(u32 *)(isec.contents.data() + rels[i+2].r_offset); */
-    /*   u32 rd = pca & 0x1f; */
-    /*   u64 max_alignment = 0; */
-    /*   for(int i = 0; i < ctx.chunks.size(); i++) { */
-    /*     OutputSection<E> *osec = ctx.chunks[i]->to_osec(); */
-    /*     if (osec) */
-    /*         max_alignment = (u64)(osec->shdr.sh_addralign) > max_alignment ? */
-    /*             (u64)(osec->shdr.sh_addralign) : max_alignment; */
-    /*   } */
-    /*   if (sym_sec->shdr().sh_flags & SHF_WRITE) { */
-    /*     max_alignment = LOONGARCH_MAX_PAGESIZE > max_alignment ? LOONGARCH_MAX_PAGESIZE : max_alignment; */
-    /*     if (symval > pc) */
-    /*       pc -= max_alignment; */
-    /*     else if (symval < pc) */
-    /*       pc += max_alignment; */
-    /*   } else { */
-    /*     if (symval > pc) */
-    /*       pc -= max_alignment; */
-    /*     else if (symval < pc) */
-    /*       pc += max_alignment; */
-    /*   } */
+      u32 pca = *(u32 *)(isec.contents.data() + r.r_offset); // do not sub delta, as the contents has not been moved yet.
+      u32 add = *(u32 *)(isec.contents.data() + rels[i+2].r_offset);
+      u32 rd = pca & 0x1f;
+      u64 max_alignment = 0;
+      for(int i = 0; i < ctx.chunks.size(); i++) {
+        OutputSection<E> *osec = ctx.chunks[i]->to_osec();
+        if (osec)
+            max_alignment = (u64)(osec->shdr.sh_addralign) > max_alignment ?
+                (u64)(osec->shdr.sh_addralign) : max_alignment;
+      }
+      if (sym_sec->shdr().sh_flags & SHF_WRITE) {
+        max_alignment = LOONGARCH_MAX_PAGESIZE > max_alignment ? LOONGARCH_MAX_PAGESIZE : max_alignment;
+        if (symval > pc)
+          pc -= max_alignment;
+        else if (symval < pc)
+          pc += max_alignment;
+      } else {
+        if (symval > pc)
+          pc -= max_alignment;
+        else if (symval < pc)
+          pc += max_alignment;
+      }
 
-    /*   const uint32_t addi_d = 0x02c00000; */
-    /*   const uint32_t pcaddi = 0x18000000; */
+      const uint32_t addi_d = 0x02c00000;
+      const uint32_t pcaddi = 0x18000000;
     
-    /*   /1* Is pcalau12i + addi.d insns?  *1/ */
-    /*   if (rels[i+2].r_type != R_LARCH_PCALA_LO12 */
-    /*       || rels[i+1].r_type != R_LARCH_RELAX */
-    /*       || rels[i+3].r_type != R_LARCH_RELAX */
-    /*       || r.r_offset + 4 != rels[i+2].r_offset */
-    /*       || (add & addi_d) != addi_d */
-    /*       /1* Is pcalau12i $rd + addi.d $rd,$rd?  *1/ */
-    /*       || (add & 0x1f) != rd */
-    /*       || ((add >> 5) & 0x1f) != rd */
-    /*       /1* Can be relaxed to pcaddi?  *1/ */
-    /*       || symval & 0x3 /1* 4 bytes align.  *1/ */
-    /*       || (long)(symval - pc) < (long)(int32_t)0xffe00000 */
-    /*       || (long)(symval - pc) > (long)(int32_t)0x1ffffc) */
-    /*     continue; */
+      /* Is pcalau12i + addi.d insns?  */
+      if (rels[i+2].r_type != R_LARCH_PCALA_LO12
+          || rels[i+1].r_type != R_LARCH_RELAX
+          || rels[i+3].r_type != R_LARCH_RELAX
+          || r.r_offset + 4 != rels[i+2].r_offset
+          || (add & addi_d) != addi_d
+          /* Is pcalau12i $rd + addi.d $rd,$rd?  */
+          || (add & 0x1f) != rd
+          || ((add >> 5) & 0x1f) != rd
+          /* Can be relaxed to pcaddi?  */
+          || symval & 0x3 /* 4 bytes align.  */
+          || (long)(symval - pc) < (long)(int32_t)0xffe00000
+          || (long)(symval - pc) > (long)(int32_t)0x1ffffc)
+        continue;
 
-    /*   r.r_type = R_LARCH_PCREL20_S2; // TODO(wx): in relocate, we need to modify opc and imm, rd. */
-    /*   rels[i+2].r_sym = 0; */
-    /*   rels[i+2].r_type = R_LARCH_NONE; */
+      /* r.r_type = R_LARCH_PCREL20_S2; // TODO(wx): in relocate, we need to modify opc and imm, rd. */
+      /* rels[i+2].r_sym = 0; */
+      /* rels[i+2].r_type = R_LARCH_NONE; */
 
-    /*   delta += 4; */
-    /*   break; */
-    /* } */
+      delta += 4;
+      break;
+    }
     }
   }
 
