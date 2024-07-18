@@ -1053,9 +1053,9 @@ static void shrink_section(Context<E> &ctx, InputSection<E> &isec) {
           || (long)(symval - pc) > (long)(int32_t)0x1ffffc)
         continue;
 
-      r.r_type = R_LARCH_PCREL20_S2; // TODO(wx): in relocate, we need to modify opc and imm, rd.
-      rels[i+2].r_sym = 0;
-      rels[i+2].r_type = R_LARCH_NONE;
+      /* r.r_type = R_LARCH_PCREL20_S2; // TODO(wx): in relocate, we need to modify opc and imm, rd. */
+      /* rels[i+2].r_sym = 0; */
+      /* rels[i+2].r_type = R_LARCH_NONE; */
 
       delta += 4;
       break;
