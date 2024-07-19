@@ -318,8 +318,8 @@ static bool loongarch_relax_pcala_addi(Context<E> &ctx, InputSection<E> *sec, In
       						  : max_alignment;
     if (sym_sec->shdr().sh_flags & SHF_WRITE) // If sym_sec is not readonly, then sym_sec not belongs to the fragment which contains rel_sec.
       {
-        max_alignment = 16384 > max_alignment ? 16384 // TODO(wx): define maxpagesize;
-      						  : max_alignment; // TODO(wx): In loongarch64, info->maxpagesize is 16384, max_alignment:this->shdr.sh_addralign
+        max_alignment = LOONGARCH_MAX_PAGESIZE > max_alignment ? LOONGARCH_MAX_PAGESIZE
+      						  : max_alignment;
         if (symval > pc)
       pc -= max_alignment;
         else if (symval < pc)
@@ -382,7 +382,7 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) { // base is 
 
     if (rel.r_type == R_NONE || rel.r_type == R_LARCH_RELAX ||
         rel.r_type == R_LARCH_MARK_LA || rel.r_type == R_LARCH_MARK_PCREL ||
-        rel.r_type == R_LARCH_ALIGN) // TODO(wx): we need support relax R_LARCH_ALIGN
+        rel.r_type == R_LARCH_ALIGN)
       continue;
 
     Symbol<E> &sym = *file.symbols[rel.r_sym]; // rel.r_sym is the index of file.symbols
@@ -599,7 +599,7 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) { // base is 
       break;
     case R_LARCH_TLS_LE_ADD_R:
       break;
-    case R_LARCH_PCREL20_S2: {// TODO(wx): we need to modify pcalau12i to pcaddi
+    case R_LARCH_PCREL20_S2: {
       const u32 pcaddi = 0x18000000;
 
       u32 pca = *(u32 *)loc;
@@ -867,12 +867,10 @@ static bool is_resizable(InputSection<E> *isec) {
 // Scan relocations to shrink sections. We do not delete bytes here, we just record how many bytes be deleted for each reloc, and adjust sec.sh_size. When we copy inputsection to outputsection, we only copy part of bytes, just like copy_contents_riscv. When relocate, we adjust the instruction bytes.
 // OutputSections'shdrs have been set before.
 static void shrink_section(Context<E> &ctx, InputSection<E> &isec) {
-  /* std::span<ElfRel<E> &> rels = isec.get_rels(ctx); */
   // get the RelRels
   // NOTE: we need to change ElfRel itself so we can not use InputSection::get_rels(ctx);
   if (isec.relsec_idx == -1) // this section no need to relocate.
     return;
-  //std::span<ElfRel<E> &> rels = isec.file.template get_data<ElfRel<E> &>(ctx, file.elf_sections[relsec_idx]);
 
   ObjectFile<E> &file = isec.file;
   const ElfShdr<E> &shdr = file.elf_sections[isec.relsec_idx];
@@ -888,10 +886,6 @@ static void shrink_section(Context<E> &ctx, InputSection<E> &isec) {
   ElfRel<E> *rels = (ElfRel<E> *)begin;
 
   isec.extra.r_deltas.resize(len + 1);
-
-  /* auto get_rd = [&](i64 offset) { */
-  /*   return bits(*(ul32 *)(isec.contents.data() + offset), 11, 7); */
-  /* }; */
 
   i64 delta = 0; // The number of bytes deleted until current rel.
 
@@ -970,7 +964,6 @@ static void shrink_section(Context<E> &ctx, InputSection<E> &isec) {
       u32 add = *(u32 *)(isec.contents.data() + rels[i+2].r_offset);
       u32 rd = pca & 0x1f;
       u64 max_alignment = 0;
-      u32 ori_pc = pc;
       for(int i = 0; i < ctx.chunks.size(); i++) {
         OutputSection<E> *osec = ctx.chunks[i]->to_osec();
         if (osec)
@@ -990,9 +983,8 @@ static void shrink_section(Context<E> &ctx, InputSection<E> &isec) {
           pc += max_alignment;
       }
 
-      const uint32_t addi_d = 0x02c00000;
-      const uint32_t pcaddi = 0x18000000;
-    
+      const u32 addi_d = 0x02c00000;
+
       /* Is pcalau12i + addi.d insns?  */
       if (rels[i+2].r_type != R_LARCH_PCALA_LO12
           || rels[i+1].r_type != R_LARCH_RELAX
@@ -1008,17 +1000,7 @@ static void shrink_section(Context<E> &ctx, InputSection<E> &isec) {
           || (long)(symval - pc) > (long)(int32_t)0x1ffffc)
         continue;
 
-      r.r_type = R_LARCH_PCREL20_S2; // TODO(wx): in relocate, we need to modify opc and imm, rd.
-
-      // TODO(wx): we need to remove this, we just debug right now.
-      /* pca = pcaddi | rd; */
-      /* //bits(page(val + 0x800) - page(pc), 31, 12) */
-      /* u32 imm = (((symval - ori_pc) >> 2) << 5) & 0x01ffffe0; */
-      /* pca = pca | imm; */
-  
-      /* const ElfShdr<E> &isec_shdr = file.elf_sections[isec.shndx]; */
-      /* u8 *dest = file.mf->data + isec_shdr.sh_offset + r.r_offset; */
-      /* putl32(pca, dest); */
+      r.r_type = R_LARCH_PCREL20_S2;
 
       rels[i+2].r_sym = 0;
       rels[i+2].r_type = R_LARCH_NONE;
@@ -1067,30 +1049,6 @@ i64 loongarch_resize_sections<E>(Context<E> &ctx) {
       sym->value -= isec->extra.r_deltas[it - rels.begin()];
     }
   });
-
-  /* // Fix reloc's r_offset. */
-  /* tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) { */
-  /*   for (std::unique_ptr<InputSection<E>> &isec : file->sections) { */
-  /*     if (!isec || isec->extra.r_deltas.empty() || isec->relsec_idx == -1) */
-  /*       continue; */
-
-  /*     const ElfShdr<E> &shdr = file->elf_sections[isec->relsec_idx]; */
-  /*     u8 *begin = file->mf->data + shdr.sh_offset; */
-  /*     u8 *end = begin + shdr.sh_size; */
-  /*     if (file->mf->data + file->mf->size < end) */
-  /*       Fatal(ctx) << *file << ": section header is out of range: " << shdr.sh_offset; */
-
-  /*     u64 size = end - begin; */
-  /*     u64 len = size / sizeof(ElfRel<E>); */
-  /*     if (size % sizeof(ElfRel<E>)) */
-  /*       Fatal(ctx) << *file << ": corrupted section"; */
-
-  /*     ElfRel<E> *rels = (ElfRel<E> *)begin; */
-  /*     for (i64 i = 0; i < len; i++) { */
-  /*       rels[i].r_offset -= isec->extra.r_deltas[i]; */
-  /*     } */
-  /*   } */
-  /* }); */
 
   // Re-compute section offset again to finalize them.
   compute_section_sizes(ctx);
