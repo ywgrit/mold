@@ -599,8 +599,10 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) { // base is 
       break;
     case R_LARCH_TLS_LE_ADD_R:
       break;
-    case R_LARCH_PCREL20_S2: // TODO(wx): we need to modify pcalau12i to pcaddi
+    case R_LARCH_PCREL20_S2: {// TODO(wx): we need to modify pcalau12i to pcaddi
+      
       break;
+    }
     default:
       unreachable();
     }
@@ -942,6 +944,7 @@ static void shrink_section(Context<E> &ctx, InputSection<E> &isec) {
       u32 add = *(u32 *)(isec.contents.data() + rels[i+2].r_offset);
       u32 rd = pca & 0x1f;
       u64 max_alignment = 0;
+      u32 ori_pc = pc;
       for(int i = 0; i < ctx.chunks.size(); i++) {
         OutputSection<E> *osec = ctx.chunks[i]->to_osec();
         if (osec)
@@ -980,6 +983,17 @@ static void shrink_section(Context<E> &ctx, InputSection<E> &isec) {
         continue;
 
       r.r_type = R_LARCH_PCREL20_S2; // TODO(wx): in relocate, we need to modify opc and imm, rd.
+
+      // TODO(wx): we need to remove this, we just debug right now.
+      pca = pcaddi | rd;
+      //bits(page(val + 0x800) - page(pc), 31, 12)
+      u32 imm = (((symval - ori_pc) >> 2) << 5) & 0x01ffffe0;
+      pca = pca | imm;
+  
+      const ElfShdr<E> &isec_shdr = file.elf_sections[isec.shndx];
+      u8 *dest = file.mf->data + isec_shdr.sh_offset + r.r_offset;
+      putl32(pca, dest);
+
       rels[i+2].r_sym = 0;
       rels[i+2].r_type = R_LARCH_NONE;
 
