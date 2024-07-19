@@ -699,6 +699,7 @@ void InputSection<E>::apply_reloc_nonalloc(Context<E> &ctx, u8 *base) {
       overwrite_uleb(loc, read_uleb(loc) - S - A);
       break;
     case R_LARCH_PCREL20_S2: {
+      u64 P = get_addr() + rel.r_offset;
       const u32 pcaddi = 0x18000000;
 
       u32 pca = *(u32 *)loc;
