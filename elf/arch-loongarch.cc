@@ -733,6 +733,13 @@ void InputSection<E>::copy_contents_loongarch(Context<E> &ctx, u8 *buf) {
   }
 
   memcpy(buf, contents.data() + pos, contents.size() - pos);
+}
+
+template <>
+void InputSection<E>::fix_roffset(Context<E> &ctx, u8 *buf) {
+  if (extra.r_deltas.empty()) {
+    return;
+  }
 
   // Fix reloc's r_offset
   const ElfShdr<E> &shdr = file.elf_sections[relsec_idx];
@@ -746,9 +753,9 @@ void InputSection<E>::copy_contents_loongarch(Context<E> &ctx, u8 *buf) {
   if (size % sizeof(ElfRel<E>))
     Fatal(ctx) << file << ": corrupted section";
 
-  ElfRel<E> *relocs = (ElfRel<E> *)begin;
+  ElfRel<E> *rels = (ElfRel<E> *)begin;
   for (i64 i = 0; i < len; i++) {
-    relocs[i].r_offset -= extra.r_deltas[i];
+    rels[i].r_offset -= extra.r_deltas[i];
   }
 }
 

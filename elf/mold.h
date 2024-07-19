@@ -332,6 +332,7 @@ private:
 
   void copy_contents_riscv(Context<E> &ctx, u8 *buf);
   void copy_contents_loongarch(Context<E> &ctx, u8 *buf);
+  void fix_roffset(Context<E> &ctx, u8 *buf);
 
   u64 get_thunk_addr(i64 idx);
 

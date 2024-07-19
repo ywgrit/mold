@@ -461,6 +461,10 @@ void InputSection<E>::write_to(Context<E> &ctx, u8 *buf) {
   else
     copy_contents(ctx, buf);
 
+  // Fix r_offset of relocations
+  if constexpr (is_loongarch<E>)
+    fix_roffset(ctx, buf);
+
   // Apply relocations
   if (!ctx.arg.relocatable) {
     if (shdr().sh_flags & SHF_ALLOC)
