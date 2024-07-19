@@ -241,129 +241,66 @@ putl32(u32 val, u8 *loc) {
   loc[3] = (val >> 24) & 0xff;
 }
 
-static bool
-loongarch_relax_delete_bytes(Context<E> &ctx, InputSection<E> *sec, u64 addr, u64 count, u8 *contents) { // content is in outputsection
-    u64 i;
-    u64 sec_shndx = sec->shndx;
-    u64 toaddr = sec->sh_size;
-    ElfShdr<E> *shdr;
-    if (sec->shndx < sec->file.elf_sections.size())
-	    shdr = &(sec->file.elf_sections[sec->shndx]);
-    else
-	    shdr = &(sec->file.elf_sections2[sec->shndx - sec->file.elf_sections.size()]);
-    shdr->sh_size -= count; // NB: this will not reduce the size of sections of outputfile because the sections of outputfile have been set before apply_reloc_[no]_alloc
-    sec->sh_size -= count;
-    memmove (contents + addr, contents + addr + count, toaddr - addr - count); // the last count bytes will be clear in ref:OutputSection<E>::write_to
-
-    std::span<ElfRel<E>> rels = sec->get_rels(ctx);
-    for (i = 0; i < rels.size(); i++)
-    {
-        if (rels[i].r_offset > addr && rels[i].r_offset < toaddr)
-            rels[i].r_offset -= count;
-    }
-
-  /* Adjust the local symbols defined in this section. */
-  std::vector<Symbol<E> *> &symbols = sec->file.symbols;
-  for (i = 0; i < symbols.size(); i++)
-    {
-      Symbol<E> *sym = symbols[i];
-      ElfSym<E> &esym = sec->file.elf_syms[i];
-      if (esym.is_undef())
-	      continue;
-
-      if (esym.st_shndx == sec_shndx) // According to gdb, esym.st_value is always same with sym->value.
-	{
-	  /* If the symbol is in the range of memory we just moved, we
-	     have to adjust its value. */
-	   if (esym.st_value > addr && esym.st_value <= toaddr)
-      {
-    	  sym->value -= count;
-          esym.st_value -= count;
-      }
-
-	  /* If the symbol *spans* the bytes we just deleted (i.e. its
-	     *end* is in the moved bytes but its *start* isn't), then we
-	     must adjust its size.
-
-	     This test needs to use the original value of st_value, otherwise
-	     we might accidentally decrease size when deleting bytes right
-	     before the symbol.  But since deleted relocs can't span across
-	     symbols, we can't have both a st_value and a st_size decrease,
-	     so it is simpler to just use an else.  */
-	 else if (esym.st_value <= addr
-		   && esym.st_value + esym.st_size > addr
-		   && esym.st_value + esym.st_size <= toaddr)
-      {
-          esym.st_size -= count;
-      }
-	}
-    }
-   
-  return true;
-}
-
+// TODO(wx): we need remove this routine
 /* static bool */
-/* loongarch_relax_pcala_addi(Context<E> &ctx, InputSection<E> *sec, InputSection<E> *sym_sec, ElfRel<E> *rel_hi, u64 symval, */
-/*                                 u64 pc, u8 *contents) { // content is the first byte of InputSection rel_hi belongs to in OutputFile. symval and pc is the relative value from the start address of OutputFile. */
-/*     ElfRel<E> *rel_lo = rel_hi + 2; */
-/*     u32 pca = *(u32 *)(contents + rel_hi->r_offset); */
-/*     u32 add = *(u32 *)(contents + rel_lo->r_offset); */
-/*     u32 rd = pca & 0x1f; */
-/*     u64 max_alignment = 0; */
-/*     u64 ori_pc = pc; */
-/*     for (int i = 0; i < ctx.osec_pool.size(); i++) */
-/*         max_alignment = (u64)(ctx.osec_pool[i]->shdr.sh_addralign) > max_alignment ? (u64)(ctx.osec_pool[i]->shdr.sh_addralign) */
-/*       						  : max_alignment; */
-/*     if (sym_sec->shdr().sh_flags & SHF_WRITE) // If sym_sec is not readonly, then sym_sec not belongs to the fragment which contains rel_sec. */
-/*       { */
-/*         max_alignment = LOONGARCH_MAX_PAGESIZE > max_alignment ? LOONGARCH_MAX_PAGESIZE */
-/*       						  : max_alignment; */
-/*         if (symval > pc) */
-/*       pc -= max_alignment; */
-/*         else if (symval < pc) */
-/*       pc += max_alignment; */
-/*       } */
+/* loongarch_relax_delete_bytes(Context<E> &ctx, InputSection<E> *sec, u64 addr, u64 count, u8 *contents) { // content is in outputsection */
+/*     u64 i; */
+/*     u64 sec_shndx = sec->shndx; */
+/*     u64 toaddr = sec->sh_size; */
+/*     ElfShdr<E> *shdr; */
+/*     if (sec->shndx < sec->file.elf_sections.size()) */
+/* 	    shdr = &(sec->file.elf_sections[sec->shndx]); */
 /*     else */
-/*       if (symval > pc) */
-/*         pc -= max_alignment; */
-/*       else if (symval < pc) */
-/*         pc += max_alignment; */
+/* 	    shdr = &(sec->file.elf_sections2[sec->shndx - sec->file.elf_sections.size()]); */
+/*     shdr->sh_size -= count; // NB: this will not reduce the size of sections of outputfile because the sections of outputfile have been set before apply_reloc_[no]_alloc */
+/*     sec->sh_size -= count; */
+/*     memmove (contents + addr, contents + addr + count, toaddr - addr - count); // the last count bytes will be clear in ref:OutputSection<E>::write_to */
 
-/*     const uint32_t addi_d = 0x02c00000; */
-/*     const uint32_t pcaddi = 0x18000000; */
-  
-/*     /1* Is pcalau12i + addi.d insns?  *1/ */
-/*     if (rel_lo->r_type != R_LARCH_PCALA_LO12 */
-/*         || (rel_lo + 1)->r_type != R_LARCH_RELAX */
-/*         || (rel_hi + 1)->r_type != R_LARCH_RELAX */
-/*         || rel_hi->r_offset + 4 != rel_lo->r_offset */
-/*         || (add & addi_d) != addi_d */
-/*         /1* Is pcalau12i $rd + addi.d $rd,$rd?  *1/ */
-/*         || (add & 0x1f) != rd */
-/*         || ((add >> 5) & 0x1f) != rd */
-/*         /1* Can be relaxed to pcaddi?  *1/ */
-/*         || symval & 0x3 /1* 4 bytes align.  *1/ */
-/*         || (long)(symval - pc) < (long)(int32_t)0xffe00000 */
-/*         || (long)(symval - pc) > (long)(int32_t)0x1ffffc) */
-/*       return false; */
-  
-/*     pca = pcaddi | rd; */
-/*     //bits(page(val + 0x800) - page(pc), 31, 12) */
-/*     u32 imm = (((symval - ori_pc) >> 2) << 5) & 0x01ffffe0; */
-/*     pca = pca | imm; */
+/*     std::span<ElfRel<E>> rels = sec->get_rels(ctx); */
+/*     for (i = 0; i < rels.size(); i++) */
+/*     { */
+/*         if (rels[i].r_offset > addr && rels[i].r_offset < toaddr) */
+/*             rels[i].r_offset -= count; */
+/*     } */
 
-/*     putl32(pca, contents + rel_hi->r_offset); */
-/*    //putl32(0x03400000, contents + rel_lo->r_offset); */
-  
-/*     /1* Adjust relocations.  *1/ */
-/*     //rel_hi->r_type = R_LARCH_PCREL20_S2; */
-/*     rel_hi->r_type = R_LARCH_NONE; */
-/*     rel_lo->r_sym = 0; */
-/*     rel_lo->r_type = R_LARCH_NONE; */
-  
-/*     loongarch_relax_delete_bytes (ctx, sec, rel_lo->r_offset, 4, contents); */
-  
-/*     return true; */
+/*   /1* Adjust the local symbols defined in this section. *1/ */
+/*   std::vector<Symbol<E> *> &symbols = sec->file.symbols; */
+/*   for (i = 0; i < symbols.size(); i++) */
+/*     { */
+/*       Symbol<E> *sym = symbols[i]; */
+/*       ElfSym<E> &esym = sec->file.elf_syms[i]; */
+/*       if (esym.is_undef()) */
+/* 	      continue; */
+
+/*       if (esym.st_shndx == sec_shndx) // According to gdb, esym.st_value is always same with sym->value. */
+/* 	{ */
+/* 	  /1* If the symbol is in the range of memory we just moved, we */
+/* 	     have to adjust its value. *1/ */
+/* 	   if (esym.st_value > addr && esym.st_value <= toaddr) */
+/*       { */
+/*     	  sym->value -= count; */
+/*           esym.st_value -= count; */
+/*       } */
+
+/* 	  /1* If the symbol *spans* the bytes we just deleted (i.e. its */
+/* 	     *end* is in the moved bytes but its *start* isn't), then we */
+/* 	     must adjust its size. */
+
+/* 	     This test needs to use the original value of st_value, otherwise */
+/* 	     we might accidentally decrease size when deleting bytes right */
+/* 	     before the symbol.  But since deleted relocs can't span across */
+/* 	     symbols, we can't have both a st_value and a st_size decrease, */
+/* 	     so it is simpler to just use an else.  *1/ */
+/* 	 else if (esym.st_value <= addr */
+/* 		   && esym.st_value + esym.st_size > addr */
+/* 		   && esym.st_value + esym.st_size <= toaddr) */
+/*       { */
+/*           esym.st_size -= count; */
+/*       } */
+/* 	} */
+/*     } */
+   
+/*   return true; */
 /* } */
 
 template <>
@@ -1016,53 +953,9 @@ static void shrink_section(Context<E> &ctx, InputSection<E> &isec) {
     switch (r.r_type) {
     case R_LARCH_PCALA_HI20: {
       if ((i + 4) > len
+          || !sym_sec
           || !loongarch_relax_pcala_addi(ctx, isec, rels, i, sym_sec, symval, pc))
         continue;
-
-/*       u32 pca = *(u32 *)(isec.contents.data() + r.r_offset); // do not sub delta, as the contents has not been moved yet. */
-/*       u32 add = *(u32 *)(isec.contents.data() + rels[i+2].r_offset); */
-/*       u32 rd = pca & 0x1f; */
-/*       u64 max_alignment = 0; */
-/*       for(int i = 0; i < ctx.chunks.size(); i++) { */
-/*         OutputSection<E> *osec = ctx.chunks[i]->to_osec(); */
-/*         if (osec) */
-/*             max_alignment = (u64)(osec->shdr.sh_addralign) > max_alignment ? */
-/*                 (u64)(osec->shdr.sh_addralign) : max_alignment; */
-/*       } */
-/*       if (sym_sec->shdr().sh_flags & SHF_WRITE) { */
-/*         max_alignment = LOONGARCH_MAX_PAGESIZE > max_alignment ? LOONGARCH_MAX_PAGESIZE : max_alignment; */
-/*         if (symval > pc) */
-/*           pc -= max_alignment; */
-/*         else if (symval < pc) */
-/*           pc += max_alignment; */
-/*       } else { */
-/*         if (symval > pc) */
-/*           pc -= max_alignment; */
-/*         else if (symval < pc) */
-/*           pc += max_alignment; */
-/*       } */
-
-/*       const u32 addi_d = 0x02c00000; */
-
-/*       /1* Is pcalau12i + addi.d insns?  *1/ */
-/*       if (rels[i+2].r_type != R_LARCH_PCALA_LO12 */
-/*           || rels[i+1].r_type != R_LARCH_RELAX */
-/*           || rels[i+3].r_type != R_LARCH_RELAX */
-/*           || r.r_offset + 4 != rels[i+2].r_offset */
-/*           || (add & addi_d) != addi_d */
-/*           /1* Is pcalau12i $rd + addi.d $rd,$rd?  *1/ */
-/*           || (add & 0x1f) != rd */
-/*           || ((add >> 5) & 0x1f) != rd */
-/*           /1* Can be relaxed to pcaddi?  *1/ */
-/*           || symval & 0x3 /1* 4 bytes align.  *1/ */
-/*           || (long)(symval - pc) < (long)(int32_t)0xffe00000 */
-/*           || (long)(symval - pc) > (long)(int32_t)0x1ffffc) */
-/*         continue; */
-
-/*       r.r_type = R_LARCH_PCREL20_S2; */
-
-/*       rels[i+2].r_sym = 0; */
-/*       rels[i+2].r_type = R_LARCH_NONE; */
 
       // NOTE: we should set delta of all rels of this symbol, and the index
       isec.extra.r_deltas[i+1] = isec.extra.r_deltas[i+2] = isec.extra.r_deltas[i+3] = delta;
