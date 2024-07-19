@@ -1042,6 +1042,33 @@ i64 loongarch_resize_sections<E>(Context<E> &ctx) {
     }
   });
 
+  // Fix reloc's r_offset.
+  tbb::parallel_for_each(ctx.objs, [&](ObjectFile<E> *file) {
+    for (std::unique_ptr<InputSection<E>> &isec : file->sections) {
+      if (!isec || isec->extra.r_deltas.empty())
+        continue;
+      if (isec->relsec_idx == -1) // this section has no relocs
+        continue;
+
+      const ElfShdr<E> &shdr = file->elf_sections[isec->relsec_idx];
+      u8 *begin = file->mf->data + shdr.sh_offset;
+      u8 *end = begin + shdr.sh_size;
+      if (file->mf->data + file->mf->size < end)
+        Fatal(ctx) << *file << ": section header is out of range: " << shdr.sh_offset;
+
+      u64 size = end - begin;
+      u64 len = size / sizeof(ElfRel<E>);
+      if (size % sizeof(ElfRel<E>))
+        Fatal(ctx) << *file << ": corrupted section";
+
+      ElfRel<E> *rels = (ElfRel<E> *)begin;
+      for (i64 i = 0; i < len; i++) {
+        ElfRel<E> &r = rels[i];
+        r.r_offset -= isec->extra.r_deltas[i];
+      }
+    }
+  });
+
   // Re-compute section offset again to finalize them.
   compute_section_sizes(ctx);
   return set_osec_offsets(ctx);
