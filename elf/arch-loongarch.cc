@@ -241,8 +241,6 @@ putl32(u32 val, u8 *loc) {
   loc[3] = (val >> 24) & 0xff;
 }
 
-// when delete bytes, we need to update both InputSection and OutputSection
-template <typename E>
 static bool
 loongarch_relax_delete_bytes(Context<E> &ctx, InputSection<E> *sec, u64 addr, u64 count, u8 *contents) { // content is in outputsection
     u64 i;
@@ -304,69 +302,69 @@ loongarch_relax_delete_bytes(Context<E> &ctx, InputSection<E> *sec, u64 addr, u6
   return true;
 }
 
-template <class E>
-static bool loongarch_relax_pcala_addi(Context<E> &ctx, InputSection<E> *sec, InputSection<E> *sym_sec, ElfRel<E> *rel_hi, u64 symval,
-                                u64 pc, u8 *contents) { // content is the first byte of InputSection rel_hi belongs to in OutputFile. symval and pc is the relative value from the start address of OutputFile.
-    ElfRel<E> *rel_lo = rel_hi + 2;
-    u32 pca = *(u32 *)(contents + rel_hi->r_offset);
-    u32 add = *(u32 *)(contents + rel_lo->r_offset);
-    u32 rd = pca & 0x1f;
-    u64 max_alignment = 0;
-    u64 ori_pc = pc;
-    for (int i = 0; i < ctx.osec_pool.size(); i++)
-        max_alignment = (u64)(ctx.osec_pool[i]->shdr.sh_addralign) > max_alignment ? (u64)(ctx.osec_pool[i]->shdr.sh_addralign)
-      						  : max_alignment;
-    if (sym_sec->shdr().sh_flags & SHF_WRITE) // If sym_sec is not readonly, then sym_sec not belongs to the fragment which contains rel_sec.
-      {
-        max_alignment = LOONGARCH_MAX_PAGESIZE > max_alignment ? LOONGARCH_MAX_PAGESIZE
-      						  : max_alignment;
-        if (symval > pc)
-      pc -= max_alignment;
-        else if (symval < pc)
-      pc += max_alignment;
-      }
-    else
-      if (symval > pc)
-        pc -= max_alignment;
-      else if (symval < pc)
-        pc += max_alignment;
+/* static bool */
+/* loongarch_relax_pcala_addi(Context<E> &ctx, InputSection<E> *sec, InputSection<E> *sym_sec, ElfRel<E> *rel_hi, u64 symval, */
+/*                                 u64 pc, u8 *contents) { // content is the first byte of InputSection rel_hi belongs to in OutputFile. symval and pc is the relative value from the start address of OutputFile. */
+/*     ElfRel<E> *rel_lo = rel_hi + 2; */
+/*     u32 pca = *(u32 *)(contents + rel_hi->r_offset); */
+/*     u32 add = *(u32 *)(contents + rel_lo->r_offset); */
+/*     u32 rd = pca & 0x1f; */
+/*     u64 max_alignment = 0; */
+/*     u64 ori_pc = pc; */
+/*     for (int i = 0; i < ctx.osec_pool.size(); i++) */
+/*         max_alignment = (u64)(ctx.osec_pool[i]->shdr.sh_addralign) > max_alignment ? (u64)(ctx.osec_pool[i]->shdr.sh_addralign) */
+/*       						  : max_alignment; */
+/*     if (sym_sec->shdr().sh_flags & SHF_WRITE) // If sym_sec is not readonly, then sym_sec not belongs to the fragment which contains rel_sec. */
+/*       { */
+/*         max_alignment = LOONGARCH_MAX_PAGESIZE > max_alignment ? LOONGARCH_MAX_PAGESIZE */
+/*       						  : max_alignment; */
+/*         if (symval > pc) */
+/*       pc -= max_alignment; */
+/*         else if (symval < pc) */
+/*       pc += max_alignment; */
+/*       } */
+/*     else */
+/*       if (symval > pc) */
+/*         pc -= max_alignment; */
+/*       else if (symval < pc) */
+/*         pc += max_alignment; */
 
-    const uint32_t addi_d = 0x02c00000;
-    const uint32_t pcaddi = 0x18000000;
+/*     const uint32_t addi_d = 0x02c00000; */
+/*     const uint32_t pcaddi = 0x18000000; */
   
-    /* Is pcalau12i + addi.d insns?  */
-    if (rel_lo->r_type != R_LARCH_PCALA_LO12
-        || (rel_lo + 1)->r_type != R_LARCH_RELAX
-        || (rel_hi + 1)->r_type != R_LARCH_RELAX
-        || rel_hi->r_offset + 4 != rel_lo->r_offset
-        || (add & addi_d) != addi_d
-        /* Is pcalau12i $rd + addi.d $rd,$rd?  */
-        || (add & 0x1f) != rd
-        || ((add >> 5) & 0x1f) != rd
-        /* Can be relaxed to pcaddi?  */
-        || symval & 0x3 /* 4 bytes align.  */
-        || (long)(symval - pc) < (long)(int32_t)0xffe00000
-        || (long)(symval - pc) > (long)(int32_t)0x1ffffc)
-      return false;
+/*     /1* Is pcalau12i + addi.d insns?  *1/ */
+/*     if (rel_lo->r_type != R_LARCH_PCALA_LO12 */
+/*         || (rel_lo + 1)->r_type != R_LARCH_RELAX */
+/*         || (rel_hi + 1)->r_type != R_LARCH_RELAX */
+/*         || rel_hi->r_offset + 4 != rel_lo->r_offset */
+/*         || (add & addi_d) != addi_d */
+/*         /1* Is pcalau12i $rd + addi.d $rd,$rd?  *1/ */
+/*         || (add & 0x1f) != rd */
+/*         || ((add >> 5) & 0x1f) != rd */
+/*         /1* Can be relaxed to pcaddi?  *1/ */
+/*         || symval & 0x3 /1* 4 bytes align.  *1/ */
+/*         || (long)(symval - pc) < (long)(int32_t)0xffe00000 */
+/*         || (long)(symval - pc) > (long)(int32_t)0x1ffffc) */
+/*       return false; */
   
-    pca = pcaddi | rd;
-    //bits(page(val + 0x800) - page(pc), 31, 12)
-    u32 imm = (((symval - ori_pc) >> 2) << 5) & 0x01ffffe0;
-    pca = pca | imm;
+/*     pca = pcaddi | rd; */
+/*     //bits(page(val + 0x800) - page(pc), 31, 12) */
+/*     u32 imm = (((symval - ori_pc) >> 2) << 5) & 0x01ffffe0; */
+/*     pca = pca | imm; */
 
-    putl32(pca, contents + rel_hi->r_offset);
-   //putl32(0x03400000, contents + rel_lo->r_offset);
+/*     putl32(pca, contents + rel_hi->r_offset); */
+/*    //putl32(0x03400000, contents + rel_lo->r_offset); */
   
-    /* Adjust relocations.  */
-    //rel_hi->r_type = R_LARCH_PCREL20_S2;
-    rel_hi->r_type = R_LARCH_NONE;
-    rel_lo->r_sym = 0;
-    rel_lo->r_type = R_LARCH_NONE;
+/*     /1* Adjust relocations.  *1/ */
+/*     //rel_hi->r_type = R_LARCH_PCREL20_S2; */
+/*     rel_hi->r_type = R_LARCH_NONE; */
+/*     rel_lo->r_sym = 0; */
+/*     rel_lo->r_type = R_LARCH_NONE; */
   
-    loongarch_relax_delete_bytes (ctx, sec, rel_lo->r_offset, 4, contents);
+/*     loongarch_relax_delete_bytes (ctx, sec, rel_lo->r_offset, 4, contents); */
   
-    return true;
-}
+/*     return true; */
+/* } */
 
 template <>
 void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) { // base is the start address of this InputSection in OutputFile. The contents of InputSection has been copied to OutputSection before this function been invoked, now we can modify the contents of OutputSection in this function.
@@ -867,6 +865,58 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
   }
 }
 
+static bool
+loongarch_relax_pcala_addi(Context<E> &ctx, InputSection<E> &isec,
+        ElfRel<E> *rels, i64 &i,
+        InputSection<E> *sym_sec,
+        u64 symval, u64 pc) { // content is the first byte of InputSection rel_hi belongs to in OutputFile. symval and pc is the relative value from the start address of OutputFile.
+  u32 pca = *(u32 *)(isec.contents.data() + rels[i].r_offset); // do not sub delta, as the contents has not been moved yet.
+  u32 add = *(u32 *)(isec.contents.data() + rels[i+2].r_offset);
+  u32 rd = pca & 0x1f;
+  u64 max_alignment = 0;
+  for(int id = 0; id < ctx.chunks.size(); id++) {
+    OutputSection<E> *osec = ctx.chunks[id]->to_osec();
+    if (osec)
+        max_alignment = (u64)(osec->shdr.sh_addralign) > max_alignment ?
+            (u64)(osec->shdr.sh_addralign) : max_alignment;
+  }
+  if (sym_sec->shdr().sh_flags & SHF_WRITE) {
+    max_alignment = LOONGARCH_MAX_PAGESIZE > max_alignment ? LOONGARCH_MAX_PAGESIZE : max_alignment;
+    if (symval > pc)
+      pc -= max_alignment;
+    else if (symval < pc)
+      pc += max_alignment;
+  } else {
+    if (symval > pc)
+      pc -= max_alignment;
+    else if (symval < pc)
+      pc += max_alignment;
+  }
+
+  const u32 addi_d = 0x02c00000;
+
+  /* Is pcalau12i + addi.d insns?  */
+  if (rels[i+2].r_type != R_LARCH_PCALA_LO12
+      || rels[i+1].r_type != R_LARCH_RELAX
+      || rels[i+3].r_type != R_LARCH_RELAX
+      || rels[i].r_offset + 4 != rels[i+2].r_offset
+      || (add & addi_d) != addi_d
+      /* Is pcalau12i $rd + addi.d $rd,$rd?  */
+      || (add & 0x1f) != rd
+      || ((add >> 5) & 0x1f) != rd
+      /* Can be relaxed to pcaddi?  */
+      || symval & 0x3 /* 4 bytes align.  */
+      || (long)(symval - pc) < (long)(int32_t)0xffe00000
+      || (long)(symval - pc) > (long)(int32_t)0x1ffffc)
+    return false;
+
+  rels[i].r_type = R_LARCH_PCREL20_S2;
+
+  rels[i+2].r_sym = 0;
+  rels[i+2].r_type = R_LARCH_NONE;
+  return true;
+}
+
 static bool is_resizable(InputSection<E> *isec) {
   return isec && isec->is_alive && (isec->shdr().sh_flags & SHF_ALLOC) &&
          (isec->shdr().sh_flags & SHF_EXECINSTR);
@@ -965,59 +1015,63 @@ static void shrink_section(Context<E> &ctx, InputSection<E> &isec) {
 
     switch (r.r_type) {
     case R_LARCH_PCALA_HI20: {
-      if ((i + 4) > len)
+      if ((i + 4) > len
+          || !loongarch_relax_pcala_addi(ctx, isec, rels, i, sym_sec, symval, pc))
         continue;
 
-      u32 pca = *(u32 *)(isec.contents.data() + r.r_offset); // do not sub delta, as the contents has not been moved yet.
-      u32 add = *(u32 *)(isec.contents.data() + rels[i+2].r_offset);
-      u32 rd = pca & 0x1f;
-      u64 max_alignment = 0;
-      for(int i = 0; i < ctx.chunks.size(); i++) {
-        OutputSection<E> *osec = ctx.chunks[i]->to_osec();
-        if (osec)
-            max_alignment = (u64)(osec->shdr.sh_addralign) > max_alignment ?
-                (u64)(osec->shdr.sh_addralign) : max_alignment;
-      }
-      if (sym_sec->shdr().sh_flags & SHF_WRITE) {
-        max_alignment = LOONGARCH_MAX_PAGESIZE > max_alignment ? LOONGARCH_MAX_PAGESIZE : max_alignment;
-        if (symval > pc)
-          pc -= max_alignment;
-        else if (symval < pc)
-          pc += max_alignment;
-      } else {
-        if (symval > pc)
-          pc -= max_alignment;
-        else if (symval < pc)
-          pc += max_alignment;
-      }
+/*       u32 pca = *(u32 *)(isec.contents.data() + r.r_offset); // do not sub delta, as the contents has not been moved yet. */
+/*       u32 add = *(u32 *)(isec.contents.data() + rels[i+2].r_offset); */
+/*       u32 rd = pca & 0x1f; */
+/*       u64 max_alignment = 0; */
+/*       for(int i = 0; i < ctx.chunks.size(); i++) { */
+/*         OutputSection<E> *osec = ctx.chunks[i]->to_osec(); */
+/*         if (osec) */
+/*             max_alignment = (u64)(osec->shdr.sh_addralign) > max_alignment ? */
+/*                 (u64)(osec->shdr.sh_addralign) : max_alignment; */
+/*       } */
+/*       if (sym_sec->shdr().sh_flags & SHF_WRITE) { */
+/*         max_alignment = LOONGARCH_MAX_PAGESIZE > max_alignment ? LOONGARCH_MAX_PAGESIZE : max_alignment; */
+/*         if (symval > pc) */
+/*           pc -= max_alignment; */
+/*         else if (symval < pc) */
+/*           pc += max_alignment; */
+/*       } else { */
+/*         if (symval > pc) */
+/*           pc -= max_alignment; */
+/*         else if (symval < pc) */
+/*           pc += max_alignment; */
+/*       } */
 
-      const u32 addi_d = 0x02c00000;
+/*       const u32 addi_d = 0x02c00000; */
 
-      /* Is pcalau12i + addi.d insns?  */
-      if (rels[i+2].r_type != R_LARCH_PCALA_LO12
-          || rels[i+1].r_type != R_LARCH_RELAX
-          || rels[i+3].r_type != R_LARCH_RELAX
-          || r.r_offset + 4 != rels[i+2].r_offset
-          || (add & addi_d) != addi_d
-          /* Is pcalau12i $rd + addi.d $rd,$rd?  */
-          || (add & 0x1f) != rd
-          || ((add >> 5) & 0x1f) != rd
-          /* Can be relaxed to pcaddi?  */
-          || symval & 0x3 /* 4 bytes align.  */
-          || (long)(symval - pc) < (long)(int32_t)0xffe00000
-          || (long)(symval - pc) > (long)(int32_t)0x1ffffc)
-        continue;
+/*       /1* Is pcalau12i + addi.d insns?  *1/ */
+/*       if (rels[i+2].r_type != R_LARCH_PCALA_LO12 */
+/*           || rels[i+1].r_type != R_LARCH_RELAX */
+/*           || rels[i+3].r_type != R_LARCH_RELAX */
+/*           || r.r_offset + 4 != rels[i+2].r_offset */
+/*           || (add & addi_d) != addi_d */
+/*           /1* Is pcalau12i $rd + addi.d $rd,$rd?  *1/ */
+/*           || (add & 0x1f) != rd */
+/*           || ((add >> 5) & 0x1f) != rd */
+/*           /1* Can be relaxed to pcaddi?  *1/ */
+/*           || symval & 0x3 /1* 4 bytes align.  *1/ */
+/*           || (long)(symval - pc) < (long)(int32_t)0xffe00000 */
+/*           || (long)(symval - pc) > (long)(int32_t)0x1ffffc) */
+/*         continue; */
 
-      r.r_type = R_LARCH_PCREL20_S2;
+/*       r.r_type = R_LARCH_PCREL20_S2; */
 
-      rels[i+2].r_sym = 0;
-      rels[i+2].r_type = R_LARCH_NONE;
+/*       rels[i+2].r_sym = 0; */
+/*       rels[i+2].r_type = R_LARCH_NONE; */
 
       // NOTE: we should set delta of all rels of this symbol, and the index
       isec.extra.r_deltas[i+1] = isec.extra.r_deltas[i+2] = isec.extra.r_deltas[i+3] = delta;
       delta += 4;
       i += 3;
       break;
+    }
+    case R_LARCH_GOT_PC_HI20: {
+
     }
     }
   }
