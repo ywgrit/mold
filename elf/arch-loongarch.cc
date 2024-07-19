@@ -698,18 +698,9 @@ void InputSection<E>::apply_reloc_nonalloc(Context<E> &ctx, u8 *base) {
     case R_LARCH_SUB_ULEB128:
       overwrite_uleb(loc, read_uleb(loc) - S - A);
       break;
-    case R_LARCH_PCREL20_S2: {
-      u64 P = get_addr() + rel.r_offset;
-      const u32 pcaddi = 0x18000000;
-
-      u32 pca = *(u32 *)loc;
-      u32 rd = pca & 0x1f;
-      u32 imm = (((S + A - P) >> 2) << 5) & 0x01ffffe0;
-      pca = pcaddi | imm |rd;
-
-      putl32(pca, loc);
+    case R_LARCH_32_PCREL:
+      *(ul32 *)loc = S + A - (get_addr() + rel.r_offset);
       break;
-    }
     default:
       Fatal(ctx) << *this << ": invalid relocation for non-allocated sections: "
                  << rel;
