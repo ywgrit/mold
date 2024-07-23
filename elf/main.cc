@@ -567,7 +567,10 @@ int elf_main(int argc, char **argv) {
 
   // Compute sizes of output sections while assigning offsets
   // within an output section to input sections.
-  compute_section_sizes(ctx);
+  bool build_extension_thunk = true;
+  if (is_loongarch<E>)
+    build_extension_thunk = false;
+  compute_section_sizes(ctx, build_extension_thunk);
 
   // If --packed_dyn_relocs=relr was given, base relocations are stored
   // to a .relr.dyn section in a compressed form. Construct a compressed

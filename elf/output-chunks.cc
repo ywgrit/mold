@@ -882,7 +882,7 @@ static std::vector<std::span<T>> split(std::vector<T> &input, i64 unit) {
 
 // Assign offsets to OutputSection members
 template <typename E>
-void OutputSection<E>::compute_section_size(Context<E> &ctx) {
+void OutputSection<E>::compute_section_size(Context<E> &ctx, bool build_extension_thunk) {
   ElfShdr<E> &shdr = this->shdr;
 
   // On most RISC systems, we need to create so-called "range extension
@@ -890,7 +890,7 @@ void OutputSection<E>::compute_section_size(Context<E> &ctx) {
   // instructions' reach is limited. create_range_extension_thunks()
   // computes the size of the section while inserting thunks.
   if constexpr (needs_thunk<E>) {
-    if ((shdr.sh_flags & SHF_EXECINSTR) && !ctx.arg.relocatable) {
+    if ((shdr.sh_flags & SHF_EXECINSTR) && !ctx.arg.relocatable && build_extension_thunk) {
       create_range_extension_thunks(ctx);
       return;
     }
@@ -954,7 +954,7 @@ void OutputSection<E>::write_to(Context<E> &ctx, u8 *buf) {
   tbb::parallel_for((i64)0, (i64)members.size(), [&](i64 i) {
     // Copy section contents to an output file.
     InputSection<E> &isec = *members[i];
-    isec.write_to(ctx, buf + isec.offset); // buf is the address in outputfile¬
+    isec.write_to(ctx, buf + isec.offset); // buf is the address in outputfile
 
     // Clear trailing padding. We write trap or nop instructions for
     // an executable segment so that a disassembler wouldn't try to
@@ -2116,7 +2116,7 @@ void MergedSection<E>::resolve(Context<E> &ctx) {
 }
 
 template <typename E>
-void MergedSection<E>::compute_section_size(Context<E> &ctx) {
+void MergedSection<E>::compute_section_size(Context<E> &ctx, bool build_extension_thunk) {
   if (!resolved)
     resolve(ctx);
 

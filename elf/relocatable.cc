@@ -154,7 +154,7 @@ void combine_objects(Context<E> &ctx) {
 
   r_claim_unresolved_symbols(ctx);
 
-  compute_section_sizes(ctx);
+  compute_section_sizes(ctx, true);
 
   sort_output_sections(ctx);
 

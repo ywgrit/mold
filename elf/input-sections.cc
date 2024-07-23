@@ -461,7 +461,7 @@ void InputSection<E>::write_to(Context<E> &ctx, u8 *buf) {
   else
     copy_contents(ctx, buf);
 
-  // Fix r_offset of relocations
+  // Fix r_offset of relocations of InputSection as relocate needs these.
   if constexpr (is_loongarch<E>)
     fix_roffset(ctx, buf);
 

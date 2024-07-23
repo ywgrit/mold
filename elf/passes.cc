@@ -1308,7 +1308,7 @@ void shuffle_sections(Context<E> &ctx) {
 }
 
 template <typename E>
-void compute_section_sizes(Context<E> &ctx) {
+void compute_section_sizes(Context<E> &ctx, bool build_extension_thunk) {
   Timer t(ctx, "compute_section_sizes");
 
   if constexpr (needs_thunk<E>) {
@@ -1319,15 +1319,15 @@ void compute_section_sizes(Context<E> &ctx) {
     // here.
     for (Chunk<E> *chunk : ctx.chunks)
       if (chunk->shdr.sh_flags & SHF_EXECINSTR)
-        chunk->compute_section_size(ctx);
+        chunk->compute_section_size(ctx, build_extension_thunk);
 
     tbb::parallel_for_each(ctx.chunks, [&](Chunk<E> *chunk) {
       if (!(chunk->shdr.sh_flags & SHF_EXECINSTR))
-        chunk->compute_section_size(ctx);
+        chunk->compute_section_size(ctx, build_extension_thunk);
     });
   } else {
     tbb::parallel_for_each(ctx.chunks, [&](Chunk<E> *chunk) {
-      chunk->compute_section_size(ctx);
+      chunk->compute_section_size(ctx, build_extension_thunk);
     });
   }
 }
@@ -3064,7 +3064,7 @@ void write_separate_debug_file(Context<E> &ctx) {
   // Restore debug info sections that had been set aside while we were
   // creating the main file.
   tbb::parallel_for_each(ctx.debug_chunks, [&](Chunk<E> *chunk) {
-    chunk->compute_section_size(ctx);
+    chunk->compute_section_size(ctx, true);
   });
 
   append(ctx.chunks, ctx.debug_chunks);
@@ -3213,7 +3213,7 @@ template void sort_init_fini(Context<E> &);
 template void sort_ctor_dtor(Context<E> &);
 template void fixup_ctors_in_init_array(Context<E> &);
 template void shuffle_sections(Context<E> &);
-template void compute_section_sizes(Context<E> &);
+template void compute_section_sizes(Context<E> &, bool build_extension_thunk);
 template void sort_output_sections(Context<E> &);
 template void claim_unresolved_symbols(Context<E> &);
 template void compute_imported_symbol_weakness(Context<E> &);

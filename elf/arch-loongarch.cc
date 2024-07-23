@@ -380,7 +380,7 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) { // base is 
     case R_LARCH_B26: {
       i64 val = S + A - P;
       if (val < -(1 << 27) || (1 << 27) <= val)
-        val = get_thunk_addr(i) + A - P;
+        val = get_thunk_addr(i) + A - P; // let branch target to linker-synthesized code, i.e., thunk.
       write_d10k16(loc, val >> 2);
       break;
     }
@@ -1006,7 +1006,7 @@ i64 loongarch_resize_sections<E>(Context<E> &ctx) {
   });
 
   // Re-compute section offset again to finalize them.
-  compute_section_sizes(ctx);
+  compute_section_sizes(ctx, true);
   return set_osec_offsets(ctx);
 }
 

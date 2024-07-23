@@ -1171,7 +1171,7 @@ i64 riscv_resize_sections<E>(Context<E> &ctx) {
   });
 
   // Re-compute section offset again to finalize them.
-  compute_section_sizes(ctx);
+  compute_section_sizes(ctx, true);
   return set_osec_offsets(ctx);
 }
 

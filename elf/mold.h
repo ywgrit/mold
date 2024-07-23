@@ -381,7 +381,7 @@ public:
   virtual ~Chunk() = default;
   virtual bool is_header() { return false; }
   virtual OutputSection<E> *to_osec() { return nullptr; }
-  virtual void compute_section_size(Context<E> &ctx) {}
+  virtual void compute_section_size(Context<E> &ctx, bool build_extension_thunk) {}
   virtual i64 get_reldyn_size(Context<E> &ctx) const { return 0; }
   virtual void construct_relr(Context<E> &ctx) {}
   virtual void copy_buf(Context<E> &ctx) {}
@@ -488,7 +488,7 @@ public:
   }
 
   OutputSection<E> *to_osec() override { return this; }
-  void compute_section_size(Context<E> &ctx) override;
+  void compute_section_size(Context<E> &ctx, bool build_extension_thunk) override;
   void construct_relr(Context<E> &ctx) override;
   void copy_buf(Context<E> &ctx) override;
   void write_to(Context<E> &ctx, u8 *buf) override;
@@ -816,7 +816,7 @@ public:
                              u64 hash, i64 p2align);
 
   void resolve(Context<E> &ctx);
-  void compute_section_size(Context<E> &ctx) override;
+  void compute_section_size(Context<E> &ctx, bool build_extension_thunk) override;
   void copy_buf(Context<E> &ctx) override;
   void write_to(Context<E> &ctx, u8 *buf) override;
   void print_stats(Context<E> &ctx);
@@ -1488,7 +1488,7 @@ template <typename E> void sort_init_fini(Context<E> &);
 template <typename E> void sort_ctor_dtor(Context<E> &);
 template <typename E> void fixup_ctors_in_init_array(Context<E> &);
 template <typename E> void shuffle_sections(Context<E> &);
-template <typename E> void compute_section_sizes(Context<E> &);
+template <typename E> void compute_section_sizes(Context<E> &, bool build_extension_thunk);
 template <typename E> void sort_output_sections(Context<E> &);
 template <typename E> void claim_unresolved_symbols(Context<E> &);
 template <typename E> void scan_relocations(Context<E> &);
