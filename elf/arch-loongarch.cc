@@ -857,6 +857,55 @@ loongarch_relax_pcala_addi(Context<E> &ctx, InputSection<E> &isec,
   return true;
 }
 
+static bool
+loongarch_relax_align(Context<E> &ctx, InputSection<E> &isec,
+        i64 &delta,
+        ElfRel<E> *rels, i64 &i,
+        InputSection<E> *sym_sec,
+        u64 symval, u64 pc) { // content is the first byte of InputSection rel_hi belongs to in OutputFile. symval and pc is the relative value from the start address of OutputFile.
+  // Handling R_LARCH_ALIGN is mandatory.
+  //
+  // R_LARCH_ALIGN refers to NOP instructions. We need to eliminate some
+  // or all of the instructions so that the instruction that immediately
+  // follows the NOPs is aligned to a specified alignment boundary.
+
+  // The total bytes of NOPs is stored to r_addend, so the next
+  // instruction is r_addend away.
+  u64 loc = isec.get_addr() + rels[i].r_offset - delta; // NOTE: we can not adjust r_offset, as relocate and copy_contents_loongarch both use old r_offset.
+  u64 addend, alignment, max = 0;
+  /* For R_LARCH_ALIGN, symval is sec_addr (sec) + rel->r_offset
+   + (alingmeng - 4).
+   If r_symndx is 0, alignment-4 is r_addend.
+   If r_symndx > 0, alignment-4 is 2^(r_addend & 0xff)-4.  */
+  if (rels[i].r_sym > 0) {
+      alignment = 1 << (rels[i].r_addend & 0xff);
+      max = rels[i].r_addend >> 8;
+  }
+  else
+      alignment = rels[i].r_addend + 4;
+  addend = alignment - 4; /* The bytes of NOPs added by R_LARCH_ALIGN.  */
+  u64 next_loc = loc + addend;
+  assert(alignment <= (1 << isec.p2align));
+  u64 aligned_addr = ((loc - 1) & ~(alignment - 1)) + alignment;
+  u64 need_nop_bytes = aligned_addr - loc; /* */
+
+  if (addend < need_nop_bytes) {
+    Error(ctx) << isec.file << ": align relax, " << need_nop_bytes
+               << " bytes required for alignment to " << alignment
+               << "-byte boundary, but only " << addend << " present";
+  }
+
+  rels[i].r_type = R_LARCH_NONE;
+
+  /* If skipping more bytes than the specified maximum,
+     then the alignment is not done at all and delete all NOPs.  */
+  if (max > 0 && need_nop_bytes > max)
+      delta += addend;
+  else
+      delta += addend - need_nop_bytes;
+}
+
+
 static bool is_resizable(InputSection<E> *isec) {
   return isec && isec->is_alive && (isec->shdr().sh_flags & SHF_ALLOC) &&
          (isec->shdr().sh_flags & SHF_EXECINSTR);
@@ -917,50 +966,8 @@ static void shrink_section(Context<E> &ctx, InputSection<E> &isec) {
 
       switch (r.r_type) {
       case R_LARCH_ALIGN: {
-        if (!align_pass) // we need to make sure that no other relaxation applied after align relaxation.
-          continue;
-
-        // Handling R_LARCH_ALIGN is mandatory.
-        //
-        // R_LARCH_ALIGN refers to NOP instructions. We need to eliminate some
-        // or all of the instructions so that the instruction that immediately
-        // follows the NOPs is aligned to a specified alignment boundary.
-
-        // The total bytes of NOPs is stored to r_addend, so the next
-        // instruction is r_addend away.
-        u64 loc = isec.get_addr() + r.r_offset - delta; // NOTE: we can not adjust r_offset, as relocate and copy_contents_loongarch both use old r_offset.
-        u64 addend, alignment, max = 0;
-        /* For R_LARCH_ALIGN, symval is sec_addr (sec) + rel->r_offset
-         + (alingmeng - 4).
-         If r_symndx is 0, alignment-4 is r_addend.
-         If r_symndx > 0, alignment-4 is 2^(r_addend & 0xff)-4.  */
-        if (r.r_sym > 0) {
-            alignment = 1 << (r.r_addend & 0xff);
-            max = r.r_addend >> 8;
-        }
-        else
-            alignment = r.r_addend + 4;
-        addend = alignment - 4; /* The bytes of NOPs added by R_LARCH_ALIGN.  */
-        u64 next_loc = loc + addend;
-        assert(alignment <= (1 << isec.p2align));
-        u64 aligned_addr = ((loc - 1) & ~(alignment - 1)) + alignment;
-        u64 need_nop_bytes = aligned_addr - loc; /* */
-
-        if (addend < need_nop_bytes) {
-          Error(ctx) << file << ": align relax, " << need_nop_bytes
-                     << " bytes required for alignment to " << alignment
-                     << "-byte boundary, but only " << addend << " present";
-        }
-
-        r.r_type = R_LARCH_NONE;
-
-        /* If skipping more bytes than the specified maximum,
-           then the alignment is not done at all and delete all NOPs.  */
-        if (max > 0 && need_nop_bytes > max)
-            delta += addend;
-        else
-            delta += addend - need_nop_bytes;
-
+        if (align_pass) // we need to make sure that no other relaxation applied after align relaxation.
+          loongarch_relax_align(ctx, isec, delta, rels, i, sym_sec, symval, pc);
         break;
       }
       case R_LARCH_PCALA_HI20: {
