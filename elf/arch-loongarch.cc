@@ -944,6 +944,9 @@ static void shrink_section(Context<E> &ctx, InputSection<E> &isec) {
     for (i64 i = 0; i < len; i++) { // rels are ordered by r_offset
       ElfRel<E> &r = rels[i];
       Symbol<E> &sym = *isec.file.symbols[r.r_sym];
+      if (sym.is_ifunc())
+        continue;
+
       u64 symval = sym.get_addr(ctx) + r.r_addend; // TODO(wx): if sym_sec == isec, we should consider the delta.
       u64 pc = isec.get_addr() + r.r_offset - delta;
       InputSection<E> *sym_sec = sym.get_input_section();
