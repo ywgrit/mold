@@ -806,7 +806,8 @@ static bool
 loongarch_relax_pcala_addi(Context<E> &ctx, InputSection<E> &isec,
         ElfRel<E> *rels, i64 &i,
         InputSection<E> *sym_sec,
-        u64 symval, u64 pc) { // content is the first byte of InputSection rel_hi belongs to in OutputFile. symval and pc is the relative value from the start address of OutputFile.
+        u64 symval, u64 pc,
+        bool *again) { // content is the first byte of InputSection rel_hi belongs to in OutputFile. symval and pc is the relative value from the start address of OutputFile.
   u32 pca = *(u32 *)(isec.contents.data() + rels[i].r_offset); // do not sub delta, as the contents has not been moved yet.
   u32 add = *(u32 *)(isec.contents.data() + rels[i+2].r_offset);
   u32 rd = pca & 0x1f;
@@ -847,6 +848,8 @@ loongarch_relax_pcala_addi(Context<E> &ctx, InputSection<E> &isec,
       || (long)(symval - pc) > (long)(int32_t)0x1ffffc)
     return false;
 
+  *again = true;
+
   rels[i].r_type = R_LARCH_PCREL20_S2;
 
   rels[i+2].r_sym = 0;
@@ -864,7 +867,7 @@ static bool is_resizable(InputSection<E> *isec) {
 static void shrink_section(Context<E> &ctx, InputSection<E> &isec) {
   // get the RelRels
   // NOTE: we need to change ElfRel itself so we can not use InputSection::get_rels(ctx);
-  if (isec.relsec_idx == -1) // this section no need to relocate.
+  if (isec.relsec_idx == -1 || !ctx.arg.relax) // this section no need to relocate.
     return;
 
   ObjectFile<E> &file = isec.file;
@@ -880,96 +883,113 @@ static void shrink_section(Context<E> &ctx, InputSection<E> &isec) {
     Fatal(ctx) << file << ": corrupted section";
   ElfRel<E> *rels = (ElfRel<E> *)begin;
 
-  isec.extra.r_deltas.resize(len + 1);
+  isec.extra.r_deltas.resize(len + 1, 0);
 
   i64 delta = 0; // The number of bytes deleted until current rel.
 
-  for (i64 i = 0; i < len; i++) { // rels are ordered by r_offset
-    ElfRel<E> &r = rels[i];
-    Symbol<E> &sym = *isec.file.symbols[r.r_sym];
-    u64 symval = sym.get_addr(ctx) + r.r_addend; // TODO(wx): if sym_sec == isec, we should consider the delta.
-    u64 pc = isec.get_addr() + r.r_offset - delta;
-    InputSection<E> *sym_sec = sym.get_input_section();
-    isec.extra.r_deltas[i] = delta;
-
-    // Handling R_LARCH_ALIGN is mandatory.
-    //
-    // R_LARCH_ALIGN refers to NOP instructions. We need to eliminate some
-    // or all of the instructions so that the instruction that immediately
-    // follows the NOPs is aligned to a specified alignment boundary.
-
-    /* if (r.r_type == R_LARCH_ALIGN) { // TODO(wx): we need to make sure that no other relaxation applied after align relaxation */
-    /*   // The total bytes of NOPs is stored to r_addend, so the next */
-    /*   // instruction is r_addend away. */
-    /*   u64 loc = isec.get_addr() + r.r_offset - delta; // NOTE: we can not adjust r_offset, as relocate and copy_contents_loongarch both use old r_offset. */
-    /*   u64 addend, alignment, max = 0; */
-    /*   /1* For R_LARCH_ALIGN, symval is sec_addr (sec) + rel->r_offset */
-	 /* + (alingmeng - 4). */
-	 /* If r_symndx is 0, alignmeng-4 is r_addend. */
-	 /* If r_symndx > 0, alignment-4 is 2^(r_addend & 0xff)-4.  *1/ */
-    /*   if (r.r_sym > 0) { */
-    /*       alignment = 1 << (r.r_addend & 0xff); */
-    /*       max = r.r_addend >> 8; */
-    /*   } */
-    /*   else */
-    /*       alignment = r.r_addend + 4; */
-    /*   addend = alignment - 4; /1* The bytes of NOPs added by R_LARCH_ALIGN.  *1/ */
-    /*   u64 next_loc = loc + addend; */
-    /*   assert(alignment <= (1 << isec.p2align)); */
-    /*   u64 aligned_addr = ((loc - 1) & ~(alignment - 1)) + alignment; */
-    /*   u64 need_nop_bytes = aligned_addr - loc; /1* *1/ */
-
-    /*   if (addend < need_nop_bytes) { */
-    /*     Error(ctx) << file << ": align relax, " << need_nop_bytes */
-    /*                << " bytes required for alignment to " << alignment */
-    /*                << "-byte boundary, but only " << addend << " present"; */
-    /*   } */
-
-    /*   r.r_type = R_LARCH_NONE; */
-
-    /*   /1* If skipping more bytes than the specified maximum, */
-    /*      then the alignment is not done at all and delete all NOPs.  *1/ */
-    /*   if (max > 0 && need_nop_bytes > max) */
-    /*       delta += addend; */
-    /*   else */
-    /*       delta += addend - need_nop_bytes; */
-    /*   continue; */
-    /* } */
-
-    // Handling other relocations is optional.
-    if (!ctx.arg.relax || i == len - 1 ||
-        rels[i + 1].r_type != R_LARCH_RELAX)
-      continue;
-
-    // Linker-synthesized symbols haven't been assigned their final
-    // values when we are shrinking sections because actual values can
-    // be computed only after we fix the file layout. Therefore, we
-    // assume that relocations against such symbols are always
-    // non-relaxable.
-    if (sym.file == ctx.internal_obj)
-      continue;
+  bool again;
+  bool align_pass = false; // Ture if we need apply alignment relaxation now.
+  do {
+    again = false;
+    delta = isec.extra.r_deltas[0];
+    for (i64 i = 0; i < len; i++) { // rels are ordered by r_offset
+      ElfRel<E> &r = rels[i];
+      Symbol<E> &sym = *isec.file.symbols[r.r_sym];
+      u64 symval = sym.get_addr(ctx) + r.r_addend; // TODO(wx): if sym_sec == isec, we should consider the delta.
+      u64 pc = isec.get_addr() + r.r_offset - delta;
+      InputSection<E> *sym_sec = sym.get_input_section();
+      isec.extra.r_deltas[i] = delta;
 
 
-    switch (r.r_type) {
-    case R_LARCH_PCALA_HI20: {
-      if ((i + 4) > len
-          || !sym_sec
-          || !loongarch_relax_pcala_addi(ctx, isec, rels, i, sym_sec, symval, pc))
+      // Handling other relocations is optional.
+      if (r.r_type != R_LARCH_ALIGN && (i == len - 1 ||
+          rels[i + 1].r_type != R_LARCH_RELAX))
         continue;
 
-      // NOTE: we should set delta of all rels of this symbol, and the index
-      isec.extra.r_deltas[i+1] = isec.extra.r_deltas[i+2] = isec.extra.r_deltas[i+3] = delta;
-      delta += 4;
-      i += 3;
-      break;
-    }
-    case R_LARCH_GOT_PC_HI20: {
+      // Linker-synthesized symbols haven't been assigned their final
+      // values when we are shrinking sections because actual values can
+      // be computed only after we fix the file layout. Therefore, we
+      // assume that relocations against such symbols are always
+      // non-relaxable.
+      if (sym.file == ctx.internal_obj)
+        continue;
 
-    }
-    }
-  }
 
-  isec.extra.r_deltas[len] = delta;
+      switch (r.r_type) {
+      case R_LARCH_ALIGN: {
+        if (!align_pass) // we need to make sure that no other relaxation applied after align relaxation.
+          continue;
+
+        // Handling R_LARCH_ALIGN is mandatory.
+        //
+        // R_LARCH_ALIGN refers to NOP instructions. We need to eliminate some
+        // or all of the instructions so that the instruction that immediately
+        // follows the NOPs is aligned to a specified alignment boundary.
+
+        // The total bytes of NOPs is stored to r_addend, so the next
+        // instruction is r_addend away.
+        u64 loc = isec.get_addr() + r.r_offset - delta; // NOTE: we can not adjust r_offset, as relocate and copy_contents_loongarch both use old r_offset.
+        u64 addend, alignment, max = 0;
+        /* For R_LARCH_ALIGN, symval is sec_addr (sec) + rel->r_offset
+         + (alingmeng - 4).
+         If r_symndx is 0, alignment-4 is r_addend.
+         If r_symndx > 0, alignment-4 is 2^(r_addend & 0xff)-4.  */
+        if (r.r_sym > 0) {
+            alignment = 1 << (r.r_addend & 0xff);
+            max = r.r_addend >> 8;
+        }
+        else
+            alignment = r.r_addend + 4;
+        addend = alignment - 4; /* The bytes of NOPs added by R_LARCH_ALIGN.  */
+        u64 next_loc = loc + addend;
+        assert(alignment <= (1 << isec.p2align));
+        u64 aligned_addr = ((loc - 1) & ~(alignment - 1)) + alignment;
+        u64 need_nop_bytes = aligned_addr - loc; /* */
+
+        if (addend < need_nop_bytes) {
+          Error(ctx) << file << ": align relax, " << need_nop_bytes
+                     << " bytes required for alignment to " << alignment
+                     << "-byte boundary, but only " << addend << " present";
+        }
+
+        r.r_type = R_LARCH_NONE;
+
+        /* If skipping more bytes than the specified maximum,
+           then the alignment is not done at all and delete all NOPs.  */
+        if (max > 0 && need_nop_bytes > max)
+            delta += addend;
+        else
+            delta += addend - need_nop_bytes;
+
+        break;
+      }
+      case R_LARCH_PCALA_HI20: {
+        if ((i + 4) > len
+            || !sym_sec
+            || !loongarch_relax_pcala_addi(ctx, isec, rels, i, sym_sec, symval, pc, &again))
+          continue;
+
+        // NOTE: we should set delta of all rels of this symbol, and the index
+        isec.extra.r_deltas[i+1] = isec.extra.r_deltas[i+2] = isec.extra.r_deltas[i+3] = delta;
+        delta += 4;
+        i += 3;
+        break;
+      }
+      case R_LARCH_GOT_PC_HI20: {
+
+      }
+      }
+    }
+
+    isec.extra.r_deltas[len] = delta;
+
+    if (!align_pass && !again) // All relaxation except alignment have been applied, and we have not apply alignment relaxation, now it's time.
+      align_pass = true;
+    else
+      align_pass = false;
+
+  } while (again || align_pass);
+
   isec.sh_size -= delta;
 }
 
