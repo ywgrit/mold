@@ -884,7 +884,6 @@ loongarch_relax_align(Context<E> &ctx, InputSection<E> &isec,
   else
       alignment = rels[i].r_addend + 4;
   addend = alignment - 4; /* The bytes of NOPs added by R_LARCH_ALIGN.  */
-  u64 next_loc = loc + addend;
   assert(alignment <= (1 << isec.p2align));
   u64 aligned_addr = ((loc - 1) & ~(alignment - 1)) + alignment;
   u64 need_nop_bytes = aligned_addr - loc; /* */
@@ -903,6 +902,8 @@ loongarch_relax_align(Context<E> &ctx, InputSection<E> &isec,
       delta += addend;
   else
       delta += addend - need_nop_bytes;
+
+  return true;
 }
 
 
