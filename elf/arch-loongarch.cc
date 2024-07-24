@@ -858,6 +858,34 @@ loongarch_relax_pcala_addi(Context<E> &ctx, InputSection<E> &isec,
 }
 
 static bool
+loongarch_relax_pcala_ld(Context<E> &ctx, InputSection<E> &isec,
+        ElfRel<E> *rels, i64 &i,
+        u64 symval, u64 pc) {
+  u32 pca = *(u32 *)(isec.contents.data() + rels[i].r_offset);
+  u32 ld = *(u32 *)(isec.contents.data() + rels[i+2].r_offset);
+  u32 rd = pca & 0x1f;
+  const u32 ld_d = 0x28c00000;
+  u32 addi_d = 0x02c00000;
+
+  /* Is pcalau12i + ld.d insns?  */
+  if (rels[i+2].r_type != R_LARCH_GOT_PC_LO12
+      || rels[i+1].r_type != R_LARCH_RELAX
+      || rels[i+3].r_type != R_LARCH_RELAX
+      || rels[i].r_offset + 4 != rels[i+2].r_offset
+      || (ld & ld_d) != ld_d
+      || (ld & 0x1f) != rd
+      || ((ld >> 5) & 0x1f) != rd)
+    return false;
+
+  addi_d = addi_d | (rd << 5) | rd;
+  putl32(addi_d, (u8 *)(isec.contents.data() + rels[i+2].r_offset));
+
+  rels[i].r_type = R_LARCH_PCALA_HI20;
+  rels[i+2].r_type = R_LARCH_PCALA_LO12;
+  return true;
+}
+
+static bool
 loongarch_relax_align(Context<E> &ctx, InputSection<E> &isec,
         i64 &delta,
         ElfRel<E> *rels, i64 &i,
@@ -974,6 +1002,17 @@ static void shrink_section(Context<E> &ctx, InputSection<E> &isec) {
           loongarch_relax_align(ctx, isec, delta, rels, i, sym_sec, symval, pc);
         break;
       }
+      case R_LARCH_GOT_PC_HI20: {
+        if (!sym.is_local(ctx) || (i + 4) > len)
+          continue;
+
+        if (loongarch_relax_pcala_ld(ctx, isec, rels, i, symval, pc))
+          if(sym_sec && loongarch_relax_pcala_addi(ctx, isec, rels, i, sym_sec, symval, pc, &again)) {
+            isec.extra.r_deltas[i+1] = isec.extra.r_deltas[i+2] = isec.extra.r_deltas[i+3] = delta;
+            delta += 4;
+            i += 3;
+          }
+      }
       case R_LARCH_PCALA_HI20: {
         if ((i + 4) > len
             || !sym_sec
@@ -985,9 +1024,6 @@ static void shrink_section(Context<E> &ctx, InputSection<E> &isec) {
         delta += 4;
         i += 3;
         break;
-      }
-      case R_LARCH_GOT_PC_HI20: {
-
       }
       }
     }
