@@ -317,7 +317,7 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) { // base is 
       break;
     case R_LARCH_B26: {
       i64 val = S + A - P;
-      if (val < -(1 << 27) || (1 << 27) <= val) // TODO(wx): I think it should be 1 << 28
+      if (val < (i32)0xf8000000 || val > (i32)0x07fffffc)
         val = get_thunk_addr(i) + A - P; // let branch target to linker-synthesized code, i.e., thunk.
       write_d10k16(loc, val >> 2);
       break;
