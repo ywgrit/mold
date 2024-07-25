@@ -379,7 +379,7 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) { // base is 
       break;
     case R_LARCH_B26: {
       i64 val = S + A - P;
-      if (val < -(1 << 27) || (1 << 27) <= val)
+      if (val < -(1 << 27) || (1 << 27) <= val) // TODO(wx): I think it should be 1 << 28
         val = get_thunk_addr(i) + A - P; // let branch target to linker-synthesized code, i.e., thunk.
       write_d10k16(loc, val >> 2);
       break;
@@ -979,6 +979,63 @@ loongarch_relax_tls_ld_gd_desc(Context<E> &ctx, InputSection<E> &isec,
   return true;
 }
 
+// call35 f -> bl f
+// tail36 $t0, f -> b f
+// TODO: if the distance between symbol and pc is too large, 
+// R_LARCH_B26 should let branch target to linker-synthesized
+// code, but now we just don't relax to R_LARCH_B26 in this case.
+static bool
+loongarch_relax_call36(Context<E> &ctx, InputSection<E> &isec,
+        ElfRel<E> *rels, i64 &i,
+        InputSection<E> *sym_sec,
+        u64 symval, u64 pc,
+        bool *again) { // content is the first byte of InputSection rel_hi belongs to in OutputFile. symval and pc is the relative value from the start address of OutputFile.
+  u32 jirl = *(u32 *)(isec.contents.data() + rels[i].r_offset + 4);
+  u32 rd = jirl & 0x1f;
+  u64 max_alignment = 0;
+  for(int id = 0; id < ctx.chunks.size(); id++) {
+    OutputSection<E> *osec = ctx.chunks[id]->to_osec();
+    if (osec)
+        max_alignment = (u64)(osec->shdr.sh_addralign) > max_alignment ?
+            (u64)(osec->shdr.sh_addralign) : max_alignment;
+  }
+  if (sym_sec->output_section->shdr.sh_flags & SHF_WRITE) {
+    max_alignment = LOONGARCH_MAX_PAGESIZE > max_alignment ? LOONGARCH_MAX_PAGESIZE : max_alignment;
+    if (symval > pc)
+      pc -= max_alignment;
+    else if (symval < pc)
+      pc += max_alignment;
+  } else {
+    if (symval > pc)
+      pc -= max_alignment;
+    else if (symval < pc)
+      pc += max_alignment;
+  }
+
+  const u32 jirl_opcode = 0x4c000000;
+
+  /* Is pcalau12i + addi.d insns?  */
+  if (rels[i+1].r_type != R_LARCH_RELAX
+      || (jirl & jirl_opcode) != jirl_opcode
+      || (long)(symval - pc) < (long)(int32_t)0xf8000000
+      || (long)(symval - pc) > (long)(int32_t)0x7fffffc)
+    return false;
+
+  *again = true;
+
+  const u32 bl = 0x54000000;
+  const u32 b = 0x50000000;
+
+  if (rd)
+    putl32(bl, (u8 *)(isec.contents.data() + rels[i].r_offset));
+  else
+    putl32(b, (u8 *)(isec.contents.data() + rels[i].r_offset));
+
+
+  rels[i].r_type = R_LARCH_B26;
+  return true;
+}
+
 static bool
 loongarch_relax_align(Context<E> &ctx, InputSection<E> &isec,
         i64 &delta,
@@ -1097,7 +1154,7 @@ static void shrink_section(Context<E> &ctx, InputSection<E> &isec) {
         break;
       }
       case R_LARCH_GOT_PC_HI20: {
-        if (!sym.is_local(ctx) || (i + 4) > len)
+        if (align_pass || !sym.is_local(ctx) || (i + 4) > len)
           continue;
 
         if (loongarch_relax_pcala_ld(ctx, isec, rels, i, symval, pc))
@@ -1109,7 +1166,8 @@ static void shrink_section(Context<E> &ctx, InputSection<E> &isec) {
         break;
       }
       case R_LARCH_PCALA_HI20: {
-        if ((i + 4) > len
+        if (align_pass
+            || (i + 4) > len
             || !sym_sec
             || !loongarch_relax_pcala_addi(ctx, isec, rels, i, sym_sec, symval, pc, &again))
           continue;
@@ -1123,6 +1181,13 @@ static void shrink_section(Context<E> &ctx, InputSection<E> &isec) {
       case R_LARCH_TLS_LD_PC_HI20:
       case R_LARCH_TLS_GD_PC_HI20:
       case R_LARCH_TLS_DESC_PC_HI20: {
+        if (align_pass)
+          continue;
+        if (r.r_type == R_LARCH_TLS_DESC_PC_HI20)
+          symval = sym.get_tlsdesc_addr(ctx) + r.r_addend;
+        else 
+          symval = sym.get_tlsgd_addr(ctx) + r.r_addend;
+
         if ((i + 4) > len
             || !sym_sec
             || !loongarch_relax_tls_ld_gd_desc(ctx, isec, rels, i, sym_sec, symval, pc, &again))
@@ -1132,6 +1197,15 @@ static void shrink_section(Context<E> &ctx, InputSection<E> &isec) {
         isec.extra.r_deltas[i+1] = isec.extra.r_deltas[i+2] = isec.extra.r_deltas[i+3] = delta;
         delta += 4;
         i += 3;
+        break;
+      }
+      case R_LARCH_CALL36: {
+        if (align_pass || !loongarch_relax_call36(ctx, isec, rels, i, sym_sec, symval, pc, &again))
+          continue;
+
+        isec.extra.r_deltas[i+1] = delta;
+        delta += 4;
+        i += 1;
         break;
       }
       }
