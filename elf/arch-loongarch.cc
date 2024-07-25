@@ -241,68 +241,6 @@ putl32(u32 val, u8 *loc) {
   loc[3] = (val >> 24) & 0xff;
 }
 
-// TODO(wx): we need remove this routine
-/* static bool */
-/* loongarch_relax_delete_bytes(Context<E> &ctx, InputSection<E> *sec, u64 addr, u64 count, u8 *contents) { // content is in outputsection */
-/*     u64 i; */
-/*     u64 sec_shndx = sec->shndx; */
-/*     u64 toaddr = sec->sh_size; */
-/*     ElfShdr<E> *shdr; */
-/*     if (sec->shndx < sec->file.elf_sections.size()) */
-/* 	    shdr = &(sec->file.elf_sections[sec->shndx]); */
-/*     else */
-/* 	    shdr = &(sec->file.elf_sections2[sec->shndx - sec->file.elf_sections.size()]); */
-/*     shdr->sh_size -= count; // NB: this will not reduce the size of sections of outputfile because the sections of outputfile have been set before apply_reloc_[no]_alloc */
-/*     sec->sh_size -= count; */
-/*     memmove (contents + addr, contents + addr + count, toaddr - addr - count); // the last count bytes will be clear in ref:OutputSection<E>::write_to */
-
-/*     std::span<ElfRel<E>> rels = sec->get_rels(ctx); */
-/*     for (i = 0; i < rels.size(); i++) */
-/*     { */
-/*         if (rels[i].r_offset > addr && rels[i].r_offset < toaddr) */
-/*             rels[i].r_offset -= count; */
-/*     } */
-
-/*   /1* Adjust the local symbols defined in this section. *1/ */
-/*   std::vector<Symbol<E> *> &symbols = sec->file.symbols; */
-/*   for (i = 0; i < symbols.size(); i++) */
-/*     { */
-/*       Symbol<E> *sym = symbols[i]; */
-/*       ElfSym<E> &esym = sec->file.elf_syms[i]; */
-/*       if (esym.is_undef()) */
-/* 	      continue; */
-
-/*       if (esym.st_shndx == sec_shndx) // According to gdb, esym.st_value is always same with sym->value. */
-/* 	{ */
-/* 	  /1* If the symbol is in the range of memory we just moved, we */
-/* 	     have to adjust its value. *1/ */
-/* 	   if (esym.st_value > addr && esym.st_value <= toaddr) */
-/*       { */
-/*     	  sym->value -= count; */
-/*           esym.st_value -= count; */
-/*       } */
-
-/* 	  /1* If the symbol *spans* the bytes we just deleted (i.e. its */
-/* 	     *end* is in the moved bytes but its *start* isn't), then we */
-/* 	     must adjust its size. */
-
-/* 	     This test needs to use the original value of st_value, otherwise */
-/* 	     we might accidentally decrease size when deleting bytes right */
-/* 	     before the symbol.  But since deleted relocs can't span across */
-/* 	     symbols, we can't have both a st_value and a st_size decrease, */
-/* 	     so it is simpler to just use an else.  *1/ */
-/* 	 else if (esym.st_value <= addr */
-/* 		   && esym.st_value + esym.st_size > addr */
-/* 		   && esym.st_value + esym.st_size <= toaddr) */
-/*       { */
-/*           esym.st_size -= count; */
-/*       } */
-/* 	} */
-/*     } */
-   
-/*   return true; */
-/* } */
-
 template <>
 void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) { // base is the start address of this InputSection in OutputFile. The contents of InputSection has been copied to OutputSection before this function been invoked, now we can modify the contents of OutputSection in this function.
   std::span<const ElfRel<E>> rels = get_rels(ctx);
@@ -883,6 +821,73 @@ loongarch_relax_pcala_addi(Context<E> &ctx, InputSection<E> &isec,
 }
 
 static bool
+loongarch_relax_tls_le(Context<E> &ctx, InputSection<E> &isec,
+        i64 &delta,
+        ElfRel<E> *rels, i64 &i,
+        u64 symval) {
+  u32 insn = *(u32 *)(isec.contents.data() + rels[i].r_offset);
+  static u32 insn_rj,insn_rd;
+  symval -= ctx.tp_addr;
+
+  /* The old LE instruction sequence can be relaxed when the symbol offset
+     is smaller than the 12-bit range.  */
+  if (rels[i+1].r_type == R_LARCH_RELAX && (symval <= 0xfff)) {
+    switch (rels[i].r_type)
+    {
+      /* if offset < 0x800, then perform the new le instruction */
+      /* sequence relax */
+      case R_LARCH_TLS_LE_HI20_R:
+      case R_LARCH_TLS_LE_ADD_R:
+      /* delete insn */
+          if (symval < 0x800) {
+            rels[i].r_sym = 0;
+            rels[i].r_type = R_LARCH_NONE;
+
+            isec.extra.r_deltas[i+1] = delta;
+            delta += 4;
+            i += 1;
+          }
+          break;
+      case R_LARCH_TLS_LE_LO12_R:
+        if (symval < 0x800)
+          {
+            /* Change rj to $tp.  */
+            insn_rj = 0x2 << 5;
+            /* Get rd register.  */
+            insn_rd = insn & 0x1f;
+            /* Write symbol offset.  */
+            symval <<= 10;
+            /* Writes the modified instruction.  */
+            insn = insn & 0xffc00000;
+            insn = insn | symval | insn_rj | insn_rd;
+            putl32(insn, (u8 *)(isec.contents.data() + rels[i].r_offset));
+          }
+        break;
+
+       case R_LARCH_TLS_LE_HI20:
+       case R_LARCH_TLS_LE64_LO20:
+       case R_LARCH_TLS_LE64_HI12:
+        rels[i].r_sym = 0;
+        rels[i].r_type = R_LARCH_NONE;
+
+        isec.extra.r_deltas[i+1] = delta;
+        delta += 4;
+        i += 1;
+        break;
+
+       case R_LARCH_TLS_LE_LO12:
+         putl32(0x03800000 | (insn & 0x1f), (u8 *)(isec.contents.data() + rels[i].r_offset));
+         break;
+
+       default:
+         break;
+    }
+  }
+
+  return true;
+}
+
+static bool
 loongarch_relax_pcala_ld(Context<E> &ctx, InputSection<E> &isec,
         ElfRel<E> *rels, i64 &i,
         u64 symval, u64 pc) {
@@ -915,7 +920,7 @@ loongarch_relax_tls_ld_gd_desc(Context<E> &ctx, InputSection<E> &isec,
         ElfRel<E> *rels, i64 &i,
         InputSection<E> *sym_sec,
         u64 symval, u64 pc,
-        bool *again) { // content is the first byte of InputSection rel_hi belongs to in OutputFile. symval and pc is the relative value from the start address of OutputFile.
+        bool *again) {
   u32 pca = *(u32 *)(isec.contents.data() + rels[i].r_offset);
   u32 add = *(u32 *)(isec.contents.data() + rels[i+2].r_offset);
   u32 rd = pca & 0x1f;
@@ -940,7 +945,6 @@ loongarch_relax_tls_ld_gd_desc(Context<E> &ctx, InputSection<E> &isec,
   }
 
   const u32 addi_d = 0x02c00000;
-  /* const u32 pcaddi = 0x18000000; */
 
   /* Is pcalau12i + addi.d insns?  */
   if ((rels[i+2].r_type != R_LARCH_GOT_PC_LO12
@@ -960,8 +964,6 @@ loongarch_relax_tls_ld_gd_desc(Context<E> &ctx, InputSection<E> &isec,
 
   *again = true;
 
-  /* pca = pcaddi | rd; */
-  /* putl32(pca, (u8 *)(isec.contents.data() + rels[i].r_offset)); */
   switch (rels[i].r_type) {
     case R_LARCH_TLS_LD_PC_HI20:
       rels[i].r_type = R_LARCH_TLS_LD_PCREL20_S2;
@@ -989,7 +991,7 @@ loongarch_relax_call36(Context<E> &ctx, InputSection<E> &isec,
         ElfRel<E> *rels, i64 &i,
         InputSection<E> *sym_sec,
         u64 symval, u64 pc,
-        bool *again) { // content is the first byte of InputSection rel_hi belongs to in OutputFile. symval and pc is the relative value from the start address of OutputFile.
+        bool *again) {
   u32 jirl = *(u32 *)(isec.contents.data() + rels[i].r_offset + 4);
   u32 rd = jirl & 0x1f;
   u64 max_alignment = 0;
@@ -1206,6 +1208,18 @@ static void shrink_section(Context<E> &ctx, InputSection<E> &isec) {
         isec.extra.r_deltas[i+1] = delta;
         delta += 4;
         i += 1;
+        break;
+      }
+      case R_LARCH_TLS_LE_HI20_R:
+      case R_LARCH_TLS_LE_LO12_R:
+      case R_LARCH_TLS_LE_ADD_R:
+      case R_LARCH_TLS_LE_HI20:
+      case R_LARCH_TLS_LE_LO12:
+      case R_LARCH_TLS_LE64_LO20:
+      case R_LARCH_TLS_LE64_HI12: {
+        if (!align_pass)
+          loongarch_relax_tls_le(ctx, isec, delta, rels, i, symval);
+
         break;
       }
       }
