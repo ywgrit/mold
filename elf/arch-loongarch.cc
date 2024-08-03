@@ -377,6 +377,7 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
           // loc stores 'ld.d', rewrite ld.d with pcaddi
           *(ul32 *)(loc) = 0x1800'0000 | get_rd(*(ul32 *)loc);
           write_j20(loc, (S + A - P) >> 2);
+          i += 3;
           break;
         case 0:
           if (i + 3 < rels.size() &&
@@ -409,6 +410,7 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
         default:
           unreachable();
       }
+      break;
     case R_LARCH_GOT64_PC_LO20:
       write_j20(loc, higher20(GOT + G + A, P));
       break;
