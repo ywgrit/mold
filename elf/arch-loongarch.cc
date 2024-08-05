@@ -383,7 +383,8 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
           if (i + 3 < rels.size() &&
             /* sym.is_pcrel_linktime_const(ctx); */
             !sym.is_ifunc() &&
-            sym.is_local(ctx) &&
+            /* sym.is_local(ctx) && */
+            !sym.is_imported &&
             /* !sym.is_absolute() && */
             (!sym.is_absolute() ||
             !ctx.arg.pic) &&
@@ -879,7 +880,8 @@ void shrink_section(Context<E> &ctx, InputSection<E> &isec, bool use_rvc) {
       if (ctx.arg.relax &&
           /* sym.is_pcrel_linktime_const(ctx); */
           !sym.is_ifunc() &&
-          sym.is_local(ctx) &&
+          /* sym.is_local(ctx) && */
+          !sym.is_imported &&
           (!sym.is_absolute() ||
           !ctx.arg.pic) &&
           i + 3 < rels.size() &&
