@@ -784,6 +784,11 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
     case R_LARCH_ADD_ULEB128:
     case R_LARCH_SUB_ULEB128:
     case R_LARCH_TLS_LE_ADD_R:
+    case R_LARCH_TLS_DESC_PC_LO12:
+    case R_LARCH_TLS_DESC64_PC_HI12:
+    case R_LARCH_TLS_DESC64_PC_LO20:
+    case R_LARCH_TLS_DESC_LD:
+    case R_LARCH_TLS_DESC_CALL:
       break;
     default:
       Error(ctx) << *this << ": unknown relocation: " << rel;
