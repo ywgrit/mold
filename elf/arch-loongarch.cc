@@ -504,6 +504,10 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
     case R_LARCH_TLS_DESC64_PC_LO20:
       write_j20(loc, higher20(sym.get_tlsdesc_addr(ctx) + A, P));
       break;
+    case R_LARCH_TLS_DESC_LD:
+      break; // nothing need to do when desc
+    case R_LARCH_TLS_DESC_CALL:
+      break; // nothing need to do when desc
     case R_LARCH_ADD6:
       *loc = (*loc & 0b1100'0000) | ((*loc + S + A) & 0b0011'1111);
       break;
