@@ -1151,7 +1151,7 @@ void GotSection<E>::add_gottp_symbol(Context<E> &ctx, Symbol<E> *sym) {
 template <typename E>
 void GotSection<E>::add_tlsgd_symbol(Context<E> &ctx, Symbol<E> *sym) {
   sym->set_tlsgd_idx(ctx, this->shdr.sh_size / sizeof(Word<E>));
-  this->shdr.sh_size += sizeof(Word<E>) * 2;
+  this->shdr.sh_size += sizeof(Word<E>) * 2; // Add two entries to got. The first entry stores the module ID, the second entry stores offset from dtv[m] to the symbol.
   tlsgd_syms.push_back(sym);
 }
 
@@ -1167,7 +1167,7 @@ void GotSection<E>::add_tlsdesc_symbol(Context<E> &ctx, Symbol<E> *sym) {
   assert(!ctx.arg.static_);
 
   sym->set_tlsdesc_idx(ctx, this->shdr.sh_size / sizeof(Word<E>));
-  this->shdr.sh_size += sizeof(Word<E>) * 2;
+  this->shdr.sh_size += sizeof(Word<E>) * 2; // The first GOT slot holds a function pointer, and the second holds an argument for the function.
   tlsdesc_syms.push_back(sym);
 }
 
@@ -1282,21 +1282,21 @@ static std::vector<GotEntry<E>> get_got_entries(Context<E> &ctx) {
       if (sym->is_imported)
         add({idx, 0, E::R_TLSDESC, sym});
       else
-        add({idx, sym->get_addr(ctx) - ctx.tls_begin, E::R_TLSDESC});
+        add({idx, sym->get_addr(ctx) - ctx.tls_begin, E::R_TLSDESC}); // the offset will be set to the next entry in got
     }
   }
 
-  for (Symbol<E> *sym : ctx.got->gottp_syms) {
+  for (Symbol<E> *sym : ctx.got->gottp_syms) { // TP-relative offset of a thread-local variable is known at process startup time as the the corresponding tls block is static.
     i64 idx = sym->get_gottp_idx(ctx);
 
     if (sym->is_imported) {
       // If we know nothing about the symbol, let the dynamic linker
       // to fill the GOT entry.
       add({idx, 0, E::R_TPOFF, sym});
-    } else if (ctx.arg.shared) {
+    } else if (ctx.arg.shared) { // not dlopen dso
       // If we know the offset within the current thread vector,
       // let the dynamic linker to adjust it.
-      add({idx, sym->get_addr(ctx) - ctx.tls_begin, E::R_TPOFF});
+      add({idx, sym->get_addr(ctx) - ctx.tls_begin, E::R_TPOFF}); // sym->get_addr(ctx) - ctx.tls_begin is the r_addend when dynamic loader do relocation on this symbol. Ref: "case __WORDSIZE == 64 ? R_RISCV_TLS_DTPREL64 : R_RISCV_TLS_DTPREL32" in dynamic loader. In dynamic loader, sym != NULL, just all members are zero.
     } else {
       // Otherwise, we know the offset from the thread pointer (TP) at
       // link-time, so we can fill the GOT entry directly.
@@ -1354,14 +1354,14 @@ void GotSection<E>::copy_buf(Context<E> &ctx) {
     *rel++ = ElfRel<E>(this->shdr.sh_addr + ent.idx * sizeof(Word<E>),
                        ent.r_type,
                        ent.sym ? ent.sym->get_dynsym_idx(ctx) : 0,
-                       ent.val);
+                       ent.val); // let dynamic loader do this relocation to get the address of symbol
 
     bool is_tlsdesc = false;
     if constexpr (supports_tlsdesc<E>)
       is_tlsdesc = (ent.r_type == E::R_TLSDESC);
 
     if (ctx.arg.apply_dynamic_relocs) {
-      if (is_tlsdesc && !is_arm32<E>) {
+      if (is_tlsdesc && !is_arm32<E>) { // TODO(wx): why we need write ent.val to this got entry as it is already in reloc->r_addend?
         // A single TLSDESC relocation fixes two consecutive GOT slots
         // where one slot holds a function pointer and the other an
         // argument to the function. An addend should be applied not to

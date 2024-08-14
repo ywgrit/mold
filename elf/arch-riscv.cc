@@ -366,7 +366,7 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
       write_utype(loc, sym.get_gottp_addr(ctx) + A - P);
       break;
     case R_RISCV_TLS_GD_HI20:
-      write_utype(loc, sym.get_tlsgd_addr(ctx) + A - P);
+      write_utype(loc, sym.get_tlsgd_addr(ctx) + A - P); // relocate the symbol to got.
       break;
     case R_RISCV_PCREL_HI20:
       write_utype(loc, S + A - P);
@@ -475,7 +475,7 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
       //   jalr   t0, tY
       //       R_RISCV_TLSDESC_CALL         .L0
       //
-      // For non-dlopen'd DSO, we may relax the instructions to the following:
+      // For non-dlopen'd DSO, we may relax the instructions to the following(Initial Exec):
       //
       //   <deleted>
       //   <deleted>
@@ -483,14 +483,14 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
       //   l[d|w] a0, %gottp_lo(a0)
       //
       // For executable, if the TP offset is small enough, we'll relax
-      // it to the following:
+      // it to the following(Local Exec with small TP offset):
       //
       //   <deleted>
       //   <deleted>
       //   <deleted>
       //   addi   a0, zero, %tpoff_lo(a0)
       //
-      // Otherwise, the following sequence is used:
+      // Otherwise, the following sequence is used(Local Exec with large TP offset):
       //
       //   <deleted>
       //   <deleted>
@@ -518,24 +518,24 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
         write_itype(loc, sym2.get_tlsdesc_addr(ctx) + A - P);
         break;
       case R_RISCV_TLSDESC_ADD_LO12:
-        if (sym2.has_tlsdesc(ctx)) {
+        if (sym2.has_tlsdesc(ctx)) { // Desc
           write_itype(loc, sym2.get_tlsdesc_addr(ctx) + A - P);
-        } else if (sym2.has_gottp(ctx)) {
+        } else if (sym2.has_gottp(ctx)) { // Initial Exec
           *(ul32 *)loc = 0x517; // auipc a0,<hi20>
           write_utype(loc, sym2.get_gottp_addr(ctx) + A - P);
-        } else {
+        } else { // Local Exec
           *(ul32 *)loc = 0x537; // lui a0,<hi20>
           write_utype(loc, S + A - ctx.tp_addr);
         }
         break;
       case R_RISCV_TLSDESC_CALL:
-        if (sym2.has_tlsdesc(ctx)) {
+        if (sym2.has_tlsdesc(ctx)) { // Desc
           // Do nothing
-        } else if (sym2.has_gottp(ctx)) {
+        } else if (sym2.has_gottp(ctx)) { // Initial Exec
           // l[d|w] a0,<lo12>
           *(ul32 *)loc = E::is_64 ? 0x53503 : 0x52503;
           write_itype(loc, sym2.get_gottp_addr(ctx) + A - P);
-        } else {
+        } else { // Local Exec
           i64 val = S + A - ctx.tp_addr;
           if (sign_extend(val, 11) == val)
             *(ul32 *)loc = 0x513;   // addi a0,zero,<lo12>
@@ -997,7 +997,7 @@ void shrink_section(Context<E> &ctx, InputSection<E> &isec, bool use_rvc) {
         delta += 4;
       break;
     case R_RISCV_TLSDESC_HI20:
-      if (!sym.has_tlsdesc(ctx))
+      if (!sym.has_tlsdesc(ctx)) // tls desc has been transmitted to ie/le.
         delta += 4;
       break;
     case R_RISCV_TLSDESC_LOAD_LO12:
@@ -1010,8 +1010,8 @@ void shrink_section(Context<E> &ctx, InputSection<E> &isec, bool use_rvc) {
           delta += 4;
       } else {
         assert(r.r_type == R_RISCV_TLSDESC_ADD_LO12);
-        if (!sym2.has_tlsdesc(ctx) && !sym2.has_gottp(ctx))
-          if (i64 val = sym2.get_addr(ctx) + rel2.r_addend - ctx.tp_addr;
+        if (!sym2.has_tlsdesc(ctx) && !sym2.has_gottp(ctx)) // Desc has transmitted to Local Exec
+          if (i64 val = sym2.get_addr(ctx) + rel2.r_addend - ctx.tp_addr; // the tls variable is within TP ± 2 KiB
               sign_extend(val, 11) == val)
             delta += 4;
       }

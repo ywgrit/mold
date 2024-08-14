@@ -490,6 +490,12 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
     case R_LARCH_TLS_GD_HI20:
       write_j20(loc, (sym.get_tlsgd_addr(ctx) + A) >> 12);
       break;
+    case R_LARCH_TLS_DESC_HI20:
+      write_j20(loc, hi20(sym.get_tlsdesc_addr(ctx) + A, P));
+      break;
+    case R_LARCH_TLS_DESC_LO12:
+      write_k12(loc, sym.get_tlsdesc_addr(ctx) + A);
+      break;
     case R_LARCH_ADD6:
       *loc = (*loc & 0b1100'0000) | ((*loc + S + A) & 0b0011'1111);
       break;
@@ -707,11 +713,18 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
     case R_LARCH_TLS_IE_PC_HI20:
       sym.flags |= NEEDS_GOTTP;
       break;
-    case R_LARCH_TLS_LD_PC_HI20:
+    case R_LARCH_TLS_LD_PC_HI20: // TODO(wx): Actually, we just need to check the hi20 reloc
     case R_LARCH_TLS_GD_PC_HI20:
     case R_LARCH_TLS_LD_HI20:
     case R_LARCH_TLS_GD_HI20:
       sym.flags |= NEEDS_TLSGD;
+      break;
+    /* case R_LARCH_TLS_DESC_HI20: */
+    case R_LARCH_TLS_DESC_PC_HI20:
+    // Actually, only handwritten assembly generate 
+    // R_LARCH_TLS_DESC_PCREL20_S2. Now We just skip this case.
+    /* case R_LARCH_TLS_DESC_PCREL20_S2: */
+      scan_tlsdesc(ctx, sym);
       break;
     case R_LARCH_32_PCREL:
     case R_LARCH_64_PCREL:

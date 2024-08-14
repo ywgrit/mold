@@ -1497,7 +1497,7 @@ void scan_relocations(Context<E> &ctx) {
   if (ctx.needs_tlsld)
     ctx.got->add_tlsld(ctx);
 
-  // Assign offsets in additional tables for each dynamic symbol.
+  // Assign offsets in additional tables for each dynamic symbol. We need iterate symbols rather than relocs as all got entries belongs to one symbol should be together.
   for (Symbol<E> *sym : syms) {
     sym->add_aux(ctx);
 

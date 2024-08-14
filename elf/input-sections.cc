@@ -352,6 +352,7 @@ void InputSection<E>::scan_tlsdesc(Context<E> &ctx, Symbol<E> &sym) {
     // statically-linked executable doesn't contain a trampoline
     // function needed for TLSDESC.
   } else if (ctx.arg.relax && sym.is_tprel_runtime_const(ctx)) {
+    // Relax TLSDESC to Initial Exec.
     // In this condition, TP-relative offset of a thread-local variable
     // is known at process startup time, so we can relax TLSDESC to the
     // code that reads the TP-relative offset from GOT and add TP to it.
