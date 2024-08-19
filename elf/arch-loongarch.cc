@@ -511,12 +511,12 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
       break;
     /* case R_LARCH_TLS_DESC_HI20: */
     case R_LARCH_TLS_DESC_PC_HI20:
-      if (removed_bytes == 0)
+      if (removed_bytes == 0 && ctx.arg.static_)
         write_j20(loc, hi20(sym.get_tlsdesc_addr(ctx) + A, P));
       break;
     /* case R_LARCH_TLS_DESC_LO12: */
     case R_LARCH_TLS_DESC_PC_LO12:
-      if (removed_bytes == 0)
+      if (removed_bytes == 0 && ctx.arg.static_)
         write_k12(loc, sym.get_tlsdesc_addr(ctx) + A);
       break;
     /* case R_LARCH_TLS_DESC64_PC_HI12: */
