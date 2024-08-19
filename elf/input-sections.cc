@@ -343,11 +343,6 @@ void InputSection<E>::scan_toc_rel(Context<E> &ctx, Symbol<E> &sym,
 
 template <typename E>
 void InputSection<E>::scan_tlsdesc(Context<E> &ctx, Symbol<E> &sym) {
-  // TODO(wx): we need to handle tls trans
-  if constexpr (is_loongarch<E>) {
-    sym.flags |= NEEDS_TLSDESC;
-    return;
-  }
   if (ctx.arg.static_ || (ctx.arg.relax && sym.is_tprel_linktime_const(ctx))) {
     // Relax TLSDESC to Local Exec. In this case, we directly materialize
     // a TP-relative offset, so no dynamic relocation is needed.

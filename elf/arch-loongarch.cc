@@ -268,6 +268,11 @@ void EhFrameSection<E>::apply_eh_reloc(Context<E> &ctx, const ElfRel<E> &rel,
   }
 }
 
+static inline bool is_hi20(const ElfRel<E> &rel) {
+  u32 ty = rel.r_type;
+  return ty == R_LARCH_TLS_DESC_PC_HI20; // TODO(wx): we need to handle all desc relocs defined in binutils
+}
+
 template <>
 void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
   std::span<const ElfRel<E>> rels = get_rels(ctx);
@@ -306,6 +311,20 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
         Error(ctx) << *this << ": misaligned symbol " << sym
                    << " for relocation " << rel;
       check(val, lo, hi);
+    };
+
+    auto find_paired_reloc = [&] {
+      if (sym.value <= rels[i].r_offset - get_r_delta(i)) {
+        for (i64 j = i - 1; j >= 0; j--)
+          if (is_hi20(rels[j]) && sym.value == rels[j].r_offset - get_r_delta(j))
+            return j;
+      } else {
+        for (i64 j = i + 1; j < rels.size(); j++)
+          if (is_hi20(rels[j]) && sym.value == rels[j].r_offset - get_r_delta(j))
+            return j;
+      }
+
+      Fatal(ctx) << *this << ": paired relocation is missing: " << i;
     };
 
     // Unlike other psABIs, the LoongArch ABI uses the same relocation
@@ -492,21 +511,45 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
       break;
     /* case R_LARCH_TLS_DESC_HI20: */
     case R_LARCH_TLS_DESC_PC_HI20:
-      write_j20(loc, hi20(sym.get_tlsdesc_addr(ctx) + A, P));
+      if (removed_bytes == 0)
+        write_j20(loc, hi20(sym.get_tlsdesc_addr(ctx) + A, P));
       break;
     /* case R_LARCH_TLS_DESC_LO12: */
     case R_LARCH_TLS_DESC_PC_LO12:
-      write_k12(loc, sym.get_tlsdesc_addr(ctx) + A);
+      if (removed_bytes == 0)
+        write_k12(loc, sym.get_tlsdesc_addr(ctx) + A);
       break;
-    case R_LARCH_TLS_DESC64_PC_HI12:
-      write_k12(loc, highest12(sym.get_tlsdesc_addr(ctx) + A, P));
-      break;
-    case R_LARCH_TLS_DESC64_PC_LO20:
-      write_j20(loc, higher20(sym.get_tlsdesc_addr(ctx) + A, P));
-      break;
+    /* case R_LARCH_TLS_DESC64_PC_HI12: */
+    /*   write_k12(loc, highest12(sym.get_tlsdesc_addr(ctx) + A, P)); */
+    /*   break; */
+    /* case R_LARCH_TLS_DESC64_PC_LO20: */
+    /*   write_j20(loc, higher20(sym.get_tlsdesc_addr(ctx) + A, P)); */
+    /*   break; */
     case R_LARCH_TLS_DESC_LD:
+      if (sym.has_tlsdesc(ctx)) // Desc, no need rewrite
+        break;
+      else if (sym.has_gottp(ctx)) { // Desc has transmitted to Initial Exec
+        // rewrite ld.d with pcalau12i %gottp_hi, a0
+        *(ul32 *)loc = 0x1a00'0004; // pcalau12i
+        write_j20(loc, hi20(sym.get_gottp_addr(ctx) + A, P));
+      } else { // Desc has transmitted to Local Exec
+        // rewrite ld.d with lu12i.w a0, %tpoff_hi
+        *(ul32 *)loc = 0x1400'0004;
+        write_j20(loc, (S + A - ctx.tp_addr) >> 12);
+      }
       break; // nothing need to do when desc
     case R_LARCH_TLS_DESC_CALL:
+      if (sym.has_tlsdesc(ctx)) // Desc, no need rewrite
+        break;
+      else if (sym.has_gottp(ctx)) { // Desc has transmitted to Initial Exec
+        // rewrite jirl with ld.d %gottp_lo, a0, a0
+        *(ul32 *)loc = 0x28e0'0084;
+        write_k12(loc, sym.get_gottp_addr(ctx) + A);
+      } else { // Desc has transmitted to Local Exec
+        // rewrite jirl with addi.d a0, a0, %tpoff_lo
+        *(ul32 *)loc = 0x02e0'0084;
+        write_k12(loc, S + A - ctx.tp_addr);
+      }
       break; // nothing need to do when desc
     case R_LARCH_ADD6:
       *loc = (*loc & 0b1100'0000) | ((*loc + S + A) & 0b0011'1111);
@@ -862,6 +905,11 @@ void shrink_section(Context<E> &ctx, InputSection<E> &isec, bool use_rvc) {
       //  addi.d  $t0, $tp, <tp-offset>
       if (i64 val = sym.get_addr(ctx) + r.r_addend - ctx.tp_addr;
           sign_extend(val, 11) == val)
+        delta += 4;
+      break;
+    case R_LARCH_TLS_DESC_PC_HI20:
+    case R_LARCH_TLS_DESC_PC_LO12:
+      if (!sym.has_tlsdesc(ctx)) // tls desc has been transmitted to ie/le in scan_tlsdesc routine.
         delta += 4;
       break;
     case R_LARCH_PCALA_HI20:
