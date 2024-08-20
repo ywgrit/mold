@@ -27,6 +27,11 @@
 
 namespace mold::elf {
 
+#define LARCH_OP_ADDI_D  0x02c00000
+#define LARCH_OP_LU12I_W 0x14000000
+#define LARCH_OP_LD_W    0x28800000
+#define LARCH_OP_LD_D    0x28c00000
+
 using E = MOLD_TARGET;
 
 static u64 page(u64 val) {
@@ -493,6 +498,13 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
     case R_LARCH_TLS_DESC_PC_HI20:
       if (removed_bytes == 0 && !ctx.arg.static_)
         write_j20(loc, hi20(sym.get_tlsdesc_addr(ctx) + A, P));
+      else if (removed_bytes != 0 && sym.has_tlsdesc(ctx)) {
+        // Rewrite pcalau12i + addi.d with pcaddi
+        assert(removed_bytes == 4);
+        *(ul32 *)loc = 0x1800'0000 | get_rd(*(ul32 *)loc); // pcaddi
+        write_j20(loc, (S + A - P) >> 2);
+        i += 3;
+      }
       break;
     case R_LARCH_TLS_DESC_PC_LO12:
       if (removed_bytes == 0 && !ctx.arg.static_)
@@ -524,8 +536,8 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
       } else {
         // Desc has transmitted to Local Exec
         i64 val = S + A - ctx.tp_addr;
-        // rewrite jirl with addi.d a0, zero, %tpoff
-        if (sign_extend(val, 11) == val)
+        // rewrite jirl with ori a0, zero, %tpoff
+        if (val <= 0xfff)
           *(ul32 *)loc = 0x02e0'0004;
         // rewrite jirl with addi.d a0, a0, %tpoff_lo
         else
@@ -883,8 +895,7 @@ void shrink_section(Context<E> &ctx, InputSection<E> &isec, bool use_rvc) {
           sign_extend(val, 11) == val)
         delta += 4;
       break;
-    case R_LARCH_TLS_DESC_PC_HI20:
-    case R_LARCH_TLS_DESC_PC_LO12: {
+    case R_LARCH_TLS_DESC_PC_HI20: {
       // LoongArch TLSDESC uses the following code sequence to materialize
       // a TP-relative address in t0 if code model is not large(-mcmodel=[!extreme]).
       //
@@ -916,16 +927,39 @@ void shrink_section(Context<E> &ctx, InputSection<E> &isec, bool use_rvc) {
       //   addi.d       $a0, $a0, %tpoff_lo(sym)
       //
       // NB: We do not handle abs or extreme code model now.
+      // If we could not transform desc to ie/le, we will try to relax the
+      // instruction sequences as following.
+      //   pcaddi      $t0, %desc_pc_lo12
+      //   ld.[w|d]    $t0, $t0, %desc_ld(sym)
+      //   jirl        $t0, $t0, %desc_call(sym)
 
-      // Tls desc has been transmitted to ie/le in scan_tlsdesc routine.
+      // Tls desc has been transformed to ie/le in scan_tlsdesc routine.
+      if (!sym.has_tlsdesc(ctx))
+        delta += 4;
+      else if (i + 3 < rels.size() &&
+          rels[i + 2].r_type == R_LARCH_PCALA_LO12 &&
+          rels[i + 2].r_offset == rels[i].r_offset + 4 &&
+          rels[i + 3].r_type == R_LARCH_RELAX) {
+        i64 dist = compute_distance(ctx, sym, isec, r);
+        u32 insn1 = *(ul32 *)(isec.contents.data() + rels[i].r_offset);
+        u32 insn2 = *(ul32 *)(isec.contents.data() + rels[i].r_offset + 4);
+        bool is_addi = (insn2 & 0xff80'0000) == 0x0280'0000;
+
+        if (dist % 4 == 0 && -(1 << 21) <= dist && dist < (1 << 21) &&
+            is_addi && get_rd(insn1) == get_rd(insn2) &&
+            get_rd(insn2) == get_rj(insn2))
+          delta += 4;
+      }
+      break;
+    }
+    case R_LARCH_TLS_DESC_PC_LO12:
       if (!sym.has_tlsdesc(ctx))
         delta += 4;
       break;
-    }
     case R_LARCH_TLS_DESC_LD:
       if (!sym.has_tlsdesc(ctx) && !sym.has_gottp(ctx)) {
         if (i64 val = sym.get_addr(ctx) + r.r_addend - ctx.tp_addr;
-            sign_extend(val, 11) == val)
+            val <= 0xfff)
           delta += 4;
       }
       break;
