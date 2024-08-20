@@ -510,13 +510,14 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
       write_j20(loc, (sym.get_tlsgd_addr(ctx) + A) >> 12);
       break;
     /* case R_LARCH_TLS_DESC_HI20: */
+    // TODO(wx): show trans example like riscv
     case R_LARCH_TLS_DESC_PC_HI20:
-      if (removed_bytes == 0 && ctx.arg.static_)
+      if (removed_bytes == 0 && !ctx.arg.static_)
         write_j20(loc, hi20(sym.get_tlsdesc_addr(ctx) + A, P));
       break;
     /* case R_LARCH_TLS_DESC_LO12: */
     case R_LARCH_TLS_DESC_PC_LO12:
-      if (removed_bytes == 0 && ctx.arg.static_)
+      if (removed_bytes == 0 && !ctx.arg.static_)
         write_k12(loc, sym.get_tlsdesc_addr(ctx) + A);
       break;
     /* case R_LARCH_TLS_DESC64_PC_HI12: */
@@ -526,31 +527,40 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
     /*   write_j20(loc, higher20(sym.get_tlsdesc_addr(ctx) + A, P)); */
     /*   break; */
     case R_LARCH_TLS_DESC_LD:
-      if (sym.has_tlsdesc(ctx)) // Desc, no need rewrite
+      if (removed_bytes == 4 || sym.has_tlsdesc(ctx))
         break;
-      else if (sym.has_gottp(ctx)) { // Desc has transmitted to Initial Exec
-        // rewrite ld.d with pcalau12i %gottp_hi, a0
-        *(ul32 *)loc = 0x1a00'0004; // pcalau12i
+      else if (sym.has_gottp(ctx)) {
+        // Desc has transmitted to Initial Exec
+        // rewrite ld.d with pcalau12i a0, %gottp_hi
+        *(ul32 *)loc = 0x1a00'0004;
         write_j20(loc, hi20(sym.get_gottp_addr(ctx) + A, P));
-      } else { // Desc has transmitted to Local Exec
+      } else {
+        // Desc has transmitted to Local Exec
         // rewrite ld.d with lu12i.w a0, %tpoff_hi
         *(ul32 *)loc = 0x1400'0004;
         write_j20(loc, (S + A - ctx.tp_addr) >> 12);
       }
-      break; // nothing need to do when desc
+      break;
     case R_LARCH_TLS_DESC_CALL:
-      if (sym.has_tlsdesc(ctx)) // Desc, no need rewrite
+      if (sym.has_tlsdesc(ctx))
         break;
-      else if (sym.has_gottp(ctx)) { // Desc has transmitted to Initial Exec
-        // rewrite jirl with ld.d %gottp_lo, a0, a0
+      else if (sym.has_gottp(ctx)) {
+        // Desc has transmitted to Initial Exec
+        // rewrite jirl with ld.d a0, a0, %gottp_lo
         *(ul32 *)loc = 0x28e0'0084;
         write_k12(loc, sym.get_gottp_addr(ctx) + A);
-      } else { // Desc has transmitted to Local Exec
+      } else {
+        // Desc has transmitted to Local Exec
+        i64 val = S + A - ctx.tp_addr;
+        // rewrite jirl with addi.d a0, zero, %tpoff
+        if (sign_extend(val, 11) == val)
+          *(ul32 *)loc = 0x02e0'0004;
         // rewrite jirl with addi.d a0, a0, %tpoff_lo
-        *(ul32 *)loc = 0x02e0'0084;
-        write_k12(loc, S + A - ctx.tp_addr);
+	else
+          *(ul32 *)loc = 0x02e0'0084;
+        write_k12(loc, val);
       }
-      break; // nothing need to do when desc
+      break;
     case R_LARCH_ADD6:
       *loc = (*loc & 0b1100'0000) | ((*loc + S + A) & 0b0011'1111);
       break;
@@ -967,6 +977,13 @@ void shrink_section(Context<E> &ctx, InputSection<E> &isec, bool use_rvc) {
       if (is_relaxable_got_load(ctx, isec, i)) {
         i64 dist = compute_distance(ctx, sym, isec, r);
         if (dist % 4 == 0 && -(1 << 21) <= dist && dist < (1 << 21))
+          delta += 4;
+      }
+      break;
+    case R_LARCH_TLS_DESC_LD:
+      if (!sym.has_tlsdesc(ctx) && !sym.has_gottp(ctx)) {
+        if (i64 val = sym.get_addr(ctx) + r.r_addend - ctx.tp_addr;
+            sign_extend(val, 11) == val)
           delta += 4;
       }
       break;
