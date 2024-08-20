@@ -27,11 +27,6 @@
 
 namespace mold::elf {
 
-#define LARCH_OP_ADDI_D  0x02c00000
-#define LARCH_OP_LU12I_W 0x14000000
-#define LARCH_OP_LD_W    0x28800000
-#define LARCH_OP_LD_D    0x28c00000
-
 using E = MOLD_TARGET;
 
 static u64 page(u64 val) {
