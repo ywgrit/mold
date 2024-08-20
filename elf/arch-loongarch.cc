@@ -268,11 +268,6 @@ void EhFrameSection<E>::apply_eh_reloc(Context<E> &ctx, const ElfRel<E> &rel,
   }
 }
 
-static inline bool is_hi20(const ElfRel<E> &rel) {
-  u32 ty = rel.r_type;
-  return ty == R_LARCH_TLS_DESC_PC_HI20; // TODO(wx): we need to handle all desc relocs defined in binutils
-}
-
 template <>
 void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
   std::span<const ElfRel<E>> rels = get_rels(ctx);
@@ -311,20 +306,6 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
         Error(ctx) << *this << ": misaligned symbol " << sym
                    << " for relocation " << rel;
       check(val, lo, hi);
-    };
-
-    auto find_paired_reloc = [&] {
-      if (sym.value <= rels[i].r_offset - get_r_delta(i)) {
-        for (i64 j = i - 1; j >= 0; j--)
-          if (is_hi20(rels[j]) && sym.value == rels[j].r_offset - get_r_delta(j))
-            return j;
-      } else {
-        for (i64 j = i + 1; j < rels.size(); j++)
-          if (is_hi20(rels[j]) && sym.value == rels[j].r_offset - get_r_delta(j))
-            return j;
-      }
-
-      Fatal(ctx) << *this << ": paired relocation is missing: " << i;
     };
 
     // Unlike other psABIs, the LoongArch ABI uses the same relocation
@@ -509,23 +490,14 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
     case R_LARCH_TLS_GD_HI20:
       write_j20(loc, (sym.get_tlsgd_addr(ctx) + A) >> 12);
       break;
-    /* case R_LARCH_TLS_DESC_HI20: */
-    // TODO(wx): show trans example like riscv
     case R_LARCH_TLS_DESC_PC_HI20:
       if (removed_bytes == 0 && !ctx.arg.static_)
         write_j20(loc, hi20(sym.get_tlsdesc_addr(ctx) + A, P));
       break;
-    /* case R_LARCH_TLS_DESC_LO12: */
     case R_LARCH_TLS_DESC_PC_LO12:
       if (removed_bytes == 0 && !ctx.arg.static_)
         write_k12(loc, sym.get_tlsdesc_addr(ctx) + A);
       break;
-    /* case R_LARCH_TLS_DESC64_PC_HI12: */
-    /*   write_k12(loc, highest12(sym.get_tlsdesc_addr(ctx) + A, P)); */
-    /*   break; */
-    /* case R_LARCH_TLS_DESC64_PC_LO20: */
-    /*   write_j20(loc, higher20(sym.get_tlsdesc_addr(ctx) + A, P)); */
-    /*   break; */
     case R_LARCH_TLS_DESC_LD:
       if (removed_bytes == 4 || sym.has_tlsdesc(ctx))
         break;
@@ -546,8 +518,8 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
         break;
       else if (sym.has_gottp(ctx)) {
         // Desc has transmitted to Initial Exec
-        // rewrite jirl with ld.d a0, a0, %gottp_lo
-        *(ul32 *)loc = 0x28e0'0084;
+        // rewrite jirl with ld.[d/w] a0, a0, %gottp_lo
+        *(ul32 *)loc = E::is_64 ? 0x28e0'0084 : 0x2880'0084;
         write_k12(loc, sym.get_gottp_addr(ctx) + A);
       } else {
         // Desc has transmitted to Local Exec
@@ -556,7 +528,7 @@ void InputSection<E>::apply_reloc_alloc(Context<E> &ctx, u8 *base) {
         if (sign_extend(val, 11) == val)
           *(ul32 *)loc = 0x02e0'0004;
         // rewrite jirl with addi.d a0, a0, %tpoff_lo
-	else
+        else
           *(ul32 *)loc = 0x02e0'0084;
         write_k12(loc, val);
       }
@@ -778,17 +750,13 @@ void InputSection<E>::scan_relocations(Context<E> &ctx) {
     case R_LARCH_TLS_IE_PC_HI20:
       sym.flags |= NEEDS_GOTTP;
       break;
-    case R_LARCH_TLS_LD_PC_HI20: // TODO(wx): Actually, we just need to check the hi20 reloc
+    case R_LARCH_TLS_LD_PC_HI20:
     case R_LARCH_TLS_GD_PC_HI20:
     case R_LARCH_TLS_LD_HI20:
     case R_LARCH_TLS_GD_HI20:
       sym.flags |= NEEDS_TLSGD;
       break;
-    /* case R_LARCH_TLS_DESC_HI20: */
     case R_LARCH_TLS_DESC_PC_HI20:
-    // Actually, only handwritten assembly generate 
-    // R_LARCH_TLS_DESC_PCREL20_S2. Now We just skip this case.
-    /* case R_LARCH_TLS_DESC_PCREL20_S2: */
       scan_tlsdesc(ctx, sym);
       break;
     case R_LARCH_32_PCREL:
@@ -918,9 +886,50 @@ void shrink_section(Context<E> &ctx, InputSection<E> &isec, bool use_rvc) {
         delta += 4;
       break;
     case R_LARCH_TLS_DESC_PC_HI20:
-    case R_LARCH_TLS_DESC_PC_LO12:
-      if (!sym.has_tlsdesc(ctx)) // tls desc has been transmitted to ie/le in scan_tlsdesc routine.
+    case R_LARCH_TLS_DESC_PC_LO12: {
+      // LoongArch TLSDESC uses the following code sequence to materialize
+      // a TP-relative address in t0 if code model is not large(-mcmodel=[!extreme]).
+      //
+      //   pcalau12i    $t0, %desc_pc_hi20(sym)         # R_LARCH_TLS_DESC_PC_HI20
+      //   addi.[w|d]   $t0, $t0, %desc_pc_lo12(sym)    # R_LARCH_TLS_DESC_PC_LO12
+      //   ld.[w|d]     $t0, $t0, %desc_ld(sym)         # R_LARCH_TLS_DESC_LD
+      //   jirl         $t0, $t0, %desc_call(sym)       # R_LARCH_TLS_DESC_CALL
+      //
+      // For non-dlopen'd DSO, we may relax the instructions to the following(Initial Exec):
+      //
+      //   <deleted>
+      //   <deleted>
+      //   pcalau12i    $a0, %gottp_hi(sym)
+      //   ld.[w|d]     $a0, $a0, %gottp_lo(sym)
+      //
+      // For executable, if the TP offset is small enough, we'll relax
+      // it to the following(Local Exec with small TP offset):
+      //
+      //   <deleted>
+      //   <deleted>
+      //   <deleted>
+      //   addi.d       $a0, zero, %tpoff(sym)
+      //
+      // Otherwise, the following sequence is used(Local Exec with large TP offset):
+      //
+      //   <deleted>
+      //   <deleted>
+      //   lu12i.w      $a0, %tpoff_hi(sym)
+      //   addi.d       $a0, $a0, %tpoff_lo(sym)
+      //
+      // NB: We do not handle abs or extreme code model now.
+
+      // Tls desc has been transmitted to ie/le in scan_tlsdesc routine.
+      if (!sym.has_tlsdesc(ctx))
         delta += 4;
+      break;
+    }
+    case R_LARCH_TLS_DESC_LD:
+      if (!sym.has_tlsdesc(ctx) && !sym.has_gottp(ctx)) {
+        if (i64 val = sym.get_addr(ctx) + r.r_addend - ctx.tp_addr;
+            sign_extend(val, 11) == val)
+          delta += 4;
+      }
       break;
     case R_LARCH_PCALA_HI20:
       // The following two instructions are used to materialize a
@@ -977,13 +986,6 @@ void shrink_section(Context<E> &ctx, InputSection<E> &isec, bool use_rvc) {
       if (is_relaxable_got_load(ctx, isec, i)) {
         i64 dist = compute_distance(ctx, sym, isec, r);
         if (dist % 4 == 0 && -(1 << 21) <= dist && dist < (1 << 21))
-          delta += 4;
-      }
-      break;
-    case R_LARCH_TLS_DESC_LD:
-      if (!sym.has_tlsdesc(ctx) && !sym.has_gottp(ctx)) {
-        if (i64 val = sym.get_addr(ctx) + r.r_addend - ctx.tp_addr;
-            sign_extend(val, 11) == val)
           delta += 4;
       }
       break;
