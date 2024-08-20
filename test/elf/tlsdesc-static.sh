@@ -20,7 +20,9 @@ _Thread_local int foo;
 EOF
 
 $CC -B. -o $t/exe1 $t/a.o $t/b.o -static
-/home/wx/glibc_install/bin/ld.so $QEMU $t/exe1 | grep -q 42
+# /home/wx/glibc_install/bin/ld.so $QEMU $t/exe1 | grep -q 42
+$QEMU $t/exe1 | grep -q 42
 
 $CC -B. -o $t/exe2 $t/a.o $t/b.o -static -Wl,-no-relax
-/home/wx/glibc_install/bin/ld.so $QEMU $t/exe2 | grep -q 42
+# /home/wx/glibc_install/bin/ld.so $QEMU $t/exe2 | grep -q 42
+$QEMU $t/exe2 | grep -q 42

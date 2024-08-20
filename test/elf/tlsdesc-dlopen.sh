@@ -32,4 +32,5 @@ int main(int argc, char **argv) {
 EOF
 
 $CC -B. -o $t/exe $t/c.o -ldl
-~/glibc_install/bin/ld.so $QEMU $t/exe $t/b.so | grep -q '3 0 5'
+# ~/glibc_install/bin/ld.so $QEMU $t/exe $t/b.so | grep -q '3 0 5'
+$QEMU $t/exe $t/b.so | grep -q '3 0 5'

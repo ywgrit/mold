@@ -33,7 +33,9 @@ int main() {
 EOF
 
 $CC -B. -o $t/exe1 $t/a.o $t/b.o
-~/glibc_install/bin/ld.so $QEMU $t/exe1 | grep -q '42 5'
+# ~/glibc_install/bin/ld.so $QEMU $t/exe1 | grep -q '42 5'
+$QEMU $t/exe1 | grep -q '42 5'
 
 $CC -B. -o $t/exe2 $t/a.o $t/b.o -Wl,--no-relax
-~/glibc_install/bin/ld.so $QEMU $t/exe2 | grep -q '42 5'
+# ~/glibc_install/bin/ld.so $QEMU $t/exe2 | grep -q '42 5'
+$QEMU $t/exe2 | grep -q '42 5'
