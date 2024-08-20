@@ -27,13 +27,13 @@ int main() {
 EOF
 
 $CC -B. -o $t/exe1 $t/c.o $t/d.o $t/b.so
-$QEMU $t/exe1 | grep -q '^5 5 5$'
+~/glibc_install/bin/ld.so $QEMU $t/exe1 | grep -q '^5 5 5$'
 
 readelf -Wr $t/exe1 > $t/log1
 ! grep -Eq 'TLS.?DESC' $t/log1 || false
 
 $CC -B. -o $t/exe1 $t/c.o $t/d.o $t/b.so -Wl,--no-relax
-$QEMU $t/exe1 | grep -q '^5 5 5$'
+~/glibc_install/bin/ld.so $QEMU $t/exe1 | grep -q '^5 5 5$'
 
 readelf -Wr $t/exe1 > $t/log2
 grep -Eq 'TLS.?DESC' $t/log2
