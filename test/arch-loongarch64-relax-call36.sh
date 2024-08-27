@@ -41,7 +41,7 @@ $OBJDUMP -d $t/exe1 > $t/exe1.objdump
 grep -A2 '<foo>:' $t/exe1.objdump | grep -wq pcaddu18i
 grep -A2 '<bar>:' $t/exe1.objdump | grep -wq pcaddu18i
 
-$CC -B. -o $t/exe2 $t/a.o $t/b.o -Wl,--relax -Wl,-Ttext=0x10000 -Wl,--section-start=.print=0x100000
+$CC -B. -o $t/exe2 $t/a.o $t/b.o -Wl,--relax -Wl,-Ttext=0x10000 -Wl,--section-start=.print=0x1000000
 $QEMU $t/exe2 | grep -q beefbeef
 
 $OBJDUMP -d $t/exe2 > $t/exe2.objdump
